@@ -2,17 +2,16 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace FileTrackerApp.Models
+namespace Past_Files.Models;
+
+public class FileLocation
 {
-    public class FileLocation
-    {
-        [Key]
-        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
-        public int FileLocationId { get; set; }
+    [Key]
+    [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public int FileLocationId { get; set; }
 
-        public string Path { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
 
-        public int FileRecordId { get; set; }
-        public FileRecord FileRecord { get; set; } = null!;
-    }
+    public int FileRecordId { get; set; }
+    public FileRecord FileRecord { get; set; } = null!;
 }

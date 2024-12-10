@@ -1,61 +1,47 @@
 ﻿// Program.cs
-using FileTrackerApp.Services;
+using Past_Files.Services;
 
-namespace FileTrackerApp
+var processor = new FileProcessor();
+
+// Specify the directory to scan
+// You can modify this to scan multiple directories if needed
+string rootDirectory = @"H:\Firaxis Games"; // Change this to the desired directory
+
+Console.WriteLine("Starting scan...");
+processor.ScanDirectory(rootDirectory);
+Console.WriteLine("Scan completed.  Database Updated");
+
+static void RetrieveInfoBasedOffFileName(FileProcessor processor)
 {
-    class Program
+    // Retrieve file information based on filename
+    Console.WriteLine("\nEnter the name of the file to get its information (including extension):");
+    string? inputFileName = Console.ReadLine();
+
+    if (!string.IsNullOrWhiteSpace(inputFileName))
     {
-        static void Main()
+        processor.GetFileInformation(inputFileName);
+    }
+
+    Console.WriteLine("\nPress any key to exit...");
+    Console.ReadKey();
+}
+
+static void CheckIfFileExisted(FileProcessor processor)
+{
+
+    // Example usage of HasFileExistedBefore
+    Console.WriteLine("\nEnter the full path of a file to check if it has existed before:");
+    string? newFilePath = Console.ReadLine();
+
+    if (!string.IsNullOrWhiteSpace(newFilePath))
+    {
+        if (processor.HasFileExistedBefore(newFilePath))
         {
-            var processor = new FileProcessor();
-
-            // Specify the directory to scan
-            // You can modify this to scan multiple directories if needed
-            string rootDirectory = @"E:\Firaxis Games"; // Change this to the desired directory
-
-            Console.WriteLine("Starting scan...");
-            DateTime scanStartTime = DateTime.Now;
-            processor.ScanDirectory(rootDirectory);
-            Console.WriteLine("Scan completed.");
-
-            // CheckIfFileExisted(processor);
-
-            //RetrieveInfoBasedOffFileName(processor);
+            Console.WriteLine("This file has been on the hard drive before.");
         }
-
-        private static void RetrieveInfoBasedOffFileName(FileProcessor processor)
+        else
         {
-            // Retrieve file information based on filename
-            Console.WriteLine("\nEnter the name of the file to get its information (including extension):");
-            string? inputFileName = Console.ReadLine();
-
-            if (!string.IsNullOrWhiteSpace(inputFileName))
-            {
-                processor.GetFileInformation(inputFileName);
-            }
-
-            Console.WriteLine("\nPress any key to exit...");
-            Console.ReadKey();
-        }
-
-        private static void CheckIfFileExisted(FileProcessor processor)
-        {
-
-            // Example usage of HasFileExistedBefore
-            Console.WriteLine("\nEnter the full path of a file to check if it has existed before:");
-            string? newFilePath = Console.ReadLine();
-
-            if (!string.IsNullOrWhiteSpace(newFilePath))
-            {
-                if (processor.HasFileExistedBefore(newFilePath))
-                {
-                    Console.WriteLine("This file has been on the hard drive before.");
-                }
-                else
-                {
-                    Console.WriteLine("This is a new file.");
-                }
-            }
+            Console.WriteLine("This is a new file.");
         }
     }
 }
