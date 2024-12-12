@@ -5,7 +5,7 @@ var processor = new FileProcessor();
 
 // Specify the directory to scan
 // You can modify this to scan multiple directories if needed
-string rootDirectory = @"H:\Firaxis Games"; // Change this to the desired directory
+string rootDirectory = @"C:\Users\arizz\Desktop\test program"; // Change this to the desired directory
 
 Console.WriteLine("Starting scan...");
 processor.ScanDirectory(rootDirectory);

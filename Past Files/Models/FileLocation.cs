@@ -13,5 +13,7 @@ public class FileLocation
     public string Path { get; set; } = string.Empty;
 
     public int FileRecordId { get; set; }
+
+    public DateTime LocationChangeNoticedTime { get; set; }
     public FileRecord FileRecord { get; set; } = null!;
 }

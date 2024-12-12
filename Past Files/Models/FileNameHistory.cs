@@ -13,7 +13,7 @@ public class FileNameHistory
 
     public string FileName { get; set; } = string.Empty;
 
-    public DateTime ChangeNoticedTime { get; set; } // Timestamp of the name change
+    public DateTime NameChangeNoticedTime { get; set; } // Timestamp of the name change
 
     public int FileRecordId { get; set; }
     public FileRecord FileRecord { get; set; } = null!;

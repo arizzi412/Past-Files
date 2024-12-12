@@ -23,9 +23,9 @@ public class FileTrackerContext : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
         => options
-            .UseSqlite("Data Source=filetracker.db")
-            .UseLoggerFactory(MyLoggerFactory) // Attach the logger
-            .EnableSensitiveDataLogging(); // Enable sensitive data (for debugging only)
+            .UseSqlite("Data Source=filetracker.db");
+         //   .UseLoggerFactory(MyLoggerFactory) // Attach the logger
+         //   .EnableSensitiveDataLogging(); // Enable sensitive data (for debugging only)
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

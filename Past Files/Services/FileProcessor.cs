@@ -76,6 +76,7 @@ public class FileProcessor
             foreach (var filePath in allFiles)
             {
                 if (counter >10) _context.SaveChanges();
+                Console.WriteLine($"Processing {filePath}");
                 ProcessFile(filePath);
                 counter++;
             }
@@ -162,7 +163,7 @@ public class FileProcessor
                 fileRecord = new FileRecord
                 {
                     Hash = fileHash ??= FileHasher.ComputeFileHash(filePath),
-                    FileName = fileInfo.Name,
+                    CurrentFileName = fileInfo.Name,
                     Size = fileInfo.Length,
                     LastWriteTime = fileInfo.LastWriteTimeUtc,
                     FirstSeen = currentTime,
@@ -195,7 +196,7 @@ public class FileProcessor
                 var initialNameHistory = new FileNameHistory
                 {
                     FileName = fileInfo.Name,
-                    ChangeNoticedTime = currentTime,
+                    NameChangeNoticedTime = currentTime,
                     FileRecordId = fileRecord.FileRecordId
                 };
                 _context.FileNameHistories.Add(initialNameHistory);
@@ -227,16 +228,16 @@ public class FileProcessor
                 }
 
                 // Check if the filename has changed
-                if (!fileRecord.FileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase))
+                if (!fileRecord.CurrentFileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     // Update the current filename
-                    fileRecord.FileName = fileInfo.Name;
+                    fileRecord.CurrentFileName = fileInfo.Name;
 
                     // Add to FileNameHistory with timestamp
                     var nameHistory = new FileNameHistory
                     {
                         FileName = fileInfo.Name,
-                        ChangeNoticedTime = currentTime,
+                        NameChangeNoticedTime = currentTime,
                         FileRecordId = fileRecord.FileRecordId
                     };
                     _context.FileNameHistories.Add(nameHistory);
@@ -250,7 +251,8 @@ public class FileProcessor
                 var newLocation = new FileLocation
                 {
                     Path = filePath,
-                    FileRecordId = fileRecord.FileRecordId
+                    FileRecordId = fileRecord.FileRecordId,
+                    LocationChangeNoticedTime = currentTime
                 };
                 _context.FileLocations.Add(newLocation);
                 fileRecord.Locations.Add(newLocation);
@@ -285,7 +287,7 @@ public class FileProcessor
 
             foreach (var file in possiblyDeletedFiles)
             {
-                Console.WriteLine($"File possibly deleted or moved: {file.FileName}");
+                Console.WriteLine($"File possibly deleted or moved: {file.CurrentFileName}");
                 foreach (var location in file.Locations.Where(l => l.Path != null))
                 {
                     Console.WriteLine($"\tPath: {location.Path}");
@@ -337,7 +339,7 @@ public class FileProcessor
                 .Include(f => f.Locations)
                 .Include(f => f.Identities)
                 .Include(f => f.NameHistories)
-                .Where(f => f.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase) ||
+                .Where(f => f.CurrentFileName.Equals(fileName, StringComparison.OrdinalIgnoreCase) ||
                             f.NameHistories.Any(n => n.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
@@ -350,7 +352,7 @@ public class FileProcessor
             foreach (var file in files)
             {
                 Console.WriteLine($"--- File Record ID: {file.FileRecordId} ---");
-                Console.WriteLine($"Current File Name: {file.FileName}");
+                Console.WriteLine($"Current File Name: {file.CurrentFileName}");
                 Console.WriteLine($"Size: {file.Size} bytes");
                 Console.WriteLine($"First Seen: {file.FirstSeen}");
                 Console.WriteLine($"Last Seen: {file.LastSeen}");
@@ -364,9 +366,9 @@ public class FileProcessor
                 }
 
                 Console.WriteLine("Filename History:");
-                foreach (var nameHistory in file.NameHistories.OrderBy(n => n.ChangeNoticedTime))
+                foreach (var nameHistory in file.NameHistories.OrderBy(n => n.NameChangeNoticedTime))
                 {
-                    Console.WriteLine($"\t{nameHistory.FileName} (Change Noticed Time: {nameHistory.ChangeNoticedTime})");
+                    Console.WriteLine($"\t{nameHistory.FileName} (Change Noticed Time: {nameHistory.NameChangeNoticedTime})");
                 }
 
                 Console.WriteLine("Identities:");
