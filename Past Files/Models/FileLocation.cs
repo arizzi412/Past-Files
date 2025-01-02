@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Past_Files.Models;
 
-public class FileLocation
+public class FileLocationHistory
 {
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

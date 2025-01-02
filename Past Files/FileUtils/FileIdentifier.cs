@@ -6,10 +6,11 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Past_Files.FileUtils;
 
-public static class FileIdentifier
+public static partial class FileIdentifier
 {
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool GetFileInformationByHandle(SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetFileInformationByHandle(SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
 
     [StructLayout(LayoutKind.Sequential)]
     struct BY_HANDLE_FILE_INFORMATION

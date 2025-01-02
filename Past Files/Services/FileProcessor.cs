@@ -37,6 +37,14 @@ public class FileProcessor
                 i => i
             );
 
+            var query = _context.FileRecords
+                .Include(f => f.Locations)
+                .Include(f => f.Identities)
+                .Include(f => f.NameHistories)
+                .AsNoTracking()
+                .Where(f => !string.IsNullOrEmpty(f.Hash));
+
+            Console.WriteLine(query.ToQueryString());
             // Load FileRecords with their Hash into a dictionary for quick hash lookup
             var fileRecords = _context.FileRecords
                 .Include(f => f.Locations)
@@ -248,7 +256,7 @@ public class FileProcessor
             // Step 4: Update FileLocation
             if (!_context.FileLocations.Any(l => l.Path == filePath && l.FileRecordId == fileRecord.FileRecordId))
             {
-                var newLocation = new FileLocation
+                var newLocation = new FileLocationHistory
                 {
                     Path = filePath,
                     FileRecordId = fileRecord.FileRecordId,

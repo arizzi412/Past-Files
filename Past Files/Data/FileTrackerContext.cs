@@ -10,7 +10,7 @@ namespace Past_Files.Data;
 public class FileTrackerContext : DbContext
 {
     public DbSet<FileRecord> FileRecords { get; set; } = null!;
-    public DbSet<FileLocation> FileLocations { get; set; } = null!;
+    public DbSet<FileLocationHistory> FileLocations { get; set; } = null!;
     public DbSet<FileIdentity> FileIdentities { get; set; } = null!;
     public DbSet<FileNameHistory> FileNameHistories { get; set; } = null!;
 
@@ -63,7 +63,7 @@ public class FileTrackerContext : DbContext
                   .IsUnique();
         });
 
-        modelBuilder.Entity<FileLocation>(entity =>
+        modelBuilder.Entity<FileLocationHistory>(entity =>
         {
             entity.HasKey(e => e.FileLocationId);
             entity.Property(e => e.FileLocationId)
