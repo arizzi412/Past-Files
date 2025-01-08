@@ -37,14 +37,6 @@ public class FileProcessor
                 i => i
             );
 
-            var query = _context.FileRecords
-                .Include(f => f.Locations)
-                .Include(f => f.Identities)
-                .Include(f => f.NameHistories)
-                .AsNoTracking()
-                .Where(f => !string.IsNullOrEmpty(f.Hash));
-
-            Console.WriteLine(query.ToQueryString());
             // Load FileRecords with their Hash into a dictionary for quick hash lookup
             var fileRecords = _context.FileRecords
                 .Include(f => f.Locations)
@@ -52,6 +44,7 @@ public class FileProcessor
                 .Include(f => f.NameHistories)
                 .AsNoTracking()
                 .Where(f => !string.IsNullOrEmpty(f.Hash))
+                .AsSplitQuery()
                 .ToList();
 
             _hashMap = fileRecords.ToDictionary(f => f.Hash, f => f);
@@ -83,7 +76,7 @@ public class FileProcessor
             int counter = 0;
             foreach (var filePath in allFiles)
             {
-                if (counter >10) _context.SaveChanges();
+                if (counter >15) _context.SaveChanges();
                 Console.WriteLine($"Processing {filePath}");
                 ProcessFile(filePath);
                 counter++;
@@ -349,6 +342,7 @@ public class FileProcessor
                 .Include(f => f.NameHistories)
                 .Where(f => f.CurrentFileName.Equals(fileName, StringComparison.OrdinalIgnoreCase) ||
                             f.NameHistories.Any(n => n.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase)))
+                .AsSplitQuery()
                 .ToList();
 
             if (files.Count == 0)

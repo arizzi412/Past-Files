@@ -172,12 +172,22 @@ public class FileProcessor
 
                 if (_hashMap.TryGetValue(fileHash, out var existingRecord))
                 {
-                    // Retrieve the tracked FileRecord
-                    fileRecord = _context.FileRecords
-                        .Include(f => f.Locations)
-                        .Include(f => f.Identities)
-                        .Include(f => f.NameHistories)
-                        .FirstOrDefault(f => f.FileRecordId == existingRecord.FileRecordId);
+
+                    // We already have an entity from the dictionary
+                    fileRecord = existingRecord;
+
+                    // Check if EF Core is already tracking this entity.
+                    // If it’s in the 'Detached' state, attach it so that changes will be tracked.
+                    if (_context.Entry(fileRecord).State == EntityState.Detached)
+                    {
+                        _context.FileRecords.Attach(fileRecord);
+
+                        // If you actually need the navigation properties, selectively load them:
+                        // _context.Entry(fileRecord).Collection(f => f.Locations).Load();
+                        // _context.Entry(fileRecord).Collection(f => f.Identities).Load();
+                        // _context.Entry(fileRecord).Collection(f => f.NameHistories).Load();
+                    }
+
 
                     if (fileRecord != null)
                     {
