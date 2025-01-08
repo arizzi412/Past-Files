@@ -1,48 +1,24 @@
-﻿// Program.cs
-using Past_Files.Services;
+﻿using Past_Files.Services;
 
-var processor = new FileProcessor();
-
-// Specify the directory to scan
-// You can modify this to scan multiple directories if needed
-//string rootDirectory = @"C:\Users\arizz\Desktop\test program"; // Change this to the desired directory
-string rootDirectory = @"E:\Firaxis Games"; // Change this to the desired directory
-
-Console.WriteLine("Starting scan...");
-processor.ScanDirectory(rootDirectory);
-Console.WriteLine("Scan completed.  Database Updated");
-
-static void RetrieveInfoBasedOffFileName(FileProcessor processor)
+public static class Program
 {
-    // Retrieve file information based on filename
-    Console.WriteLine("\nEnter the name of the file to get its information (including extension):");
-    string? inputFileName = Console.ReadLine();
-
-    if (!string.IsNullOrWhiteSpace(inputFileName))
+    public static void Main()
     {
-        processor.GetFileInformation(inputFileName);
-    }
+        // Create the console logger service (optional to pass in explicitly)
+        using var loggerService = new ConsoleLoggerService();
 
-    Console.WriteLine("\nPress any key to exit...");
-    Console.ReadKey();
-}
+        // Create the FileProcessor with a 20-second autosave interval and pass in the logger
+        using var processor = new FileProcessor(saveIntervalInSeconds: 20, logger: loggerService);
 
-static void CheckIfFileExisted(FileProcessor processor)
-{
+        // Specify the directory to scan
+        string rootDirectory = @"E:\Firaxis Games";
 
-    // Example usage of HasFileExistedBefore
-    Console.WriteLine("\nEnter the full path of a file to check if it has existed before:");
-    string? newFilePath = Console.ReadLine();
+        loggerService.Enqueue("Starting scan...");
+        processor.ScanDirectory(rootDirectory);
+        loggerService.Enqueue("Scan completed. Database Updated.");
 
-    if (!string.IsNullOrWhiteSpace(newFilePath))
-    {
-        if (processor.HasFileExistedBefore(newFilePath))
-        {
-            Console.WriteLine("This file has been on the hard drive before.");
-        }
-        else
-        {
-            Console.WriteLine("This is a new file.");
-        }
+        // Example usage
+        Console.WriteLine("\nPress any key to exit...");
+        Console.ReadKey();
     }
 }
