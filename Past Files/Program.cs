@@ -16,9 +16,13 @@ public static class Program
         Data.FileTrackerContext dbContext = null;
         FileProcessor processor = null;
 
+        Models.Path rootDirectory = null; ;
+
         Parser.Default.ParseArguments<Options>(args)
             .WithParsed(options =>
             {
+                rootDirectory = options.rootDirectory ?? @"E:\Firaxis Games";
+
                 if (options.DatabasePath is not null)
                 {
                     dbContext = new Data.FileTrackerContext(options.DatabasePath);
@@ -32,19 +36,18 @@ public static class Program
                 if (options.OldDatabasePath != null)
                 {
                     var oldDBInfo = DBImportInfo.CreateDBImportInfo(options.OldDatabasePath, loggerService);
-                    new FileProcessor(dbContext!, oldDBInfo, saveIntervalInSeconds: 20, logger: loggerService);
+                    processor = new FileProcessor(dbContext!, oldDBInfo, saveIntervalInSeconds: 20, logger: loggerService);
                 }
-
-                new FileProcessor(dbContext!, saveIntervalInSeconds: 20, logger: loggerService);
+                else
+                {
+                    processor = new FileProcessor(dbContext!, saveIntervalInSeconds: 20, logger: loggerService);
+                }
             });
 
 
 
-        // Specify the directory to scan
-        Models.Path rootDirectory = args.FirstOrDefault() ?? @"E:\Firaxis Games";
-
         loggerService.Enqueue("Starting scan...");
-        processor.ScanDirectory(rootDirectory);
+        processor!.ScanDirectory(rootDirectory);
         loggerService.Enqueue("Scan completed. Database Updated.");
 
         // Example usage
@@ -55,7 +58,11 @@ public static class Program
 
 class Options
 {
-    [Option('d', "db", Required = false, HelpText = "Specifies the -db argument.")]
+    [Option('d', "directory", Required = false, HelpText = "Specifies the -directory argument.")]
+    public string? rootDirectory { get; set; }
+
+
+    [Option("db", Required = false, HelpText = "Specifies the -db argument.")]
     public string? DatabasePath { get; set; }
 
     [Option('i', "import", Required = false, HelpText = "Specifies the -import argument.")]

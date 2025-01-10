@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Past Files": {
+      "commandName": "Project",
+      "commandLineArgs": "-i \"C:\\Users\\arizz\\Desktop\\filetracker.db\""
+    }
+  }
+}

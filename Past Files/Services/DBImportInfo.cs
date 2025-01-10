@@ -11,6 +11,7 @@ namespace Past_Files.Services
         public static DBImportInfo CreateDBImportInfo(string dbName, ConsoleLoggerService consoleLoggerService) => new(dbName, consoleLoggerService);
         private DBImportInfo(string dbName, ConsoleLoggerService consoleLoggerService)
         {
+            consoleLoggerService.Enqueue("Reading data from import database");
             ImportedDbContext = new FileTrackerContext(dbName);
             dataStore = new DataStore(consoleLoggerService);
             dataStore.LoadRecords(ImportedDbContext);

@@ -50,7 +50,7 @@ public class FileProcessor : IDisposable
         }
         catch (Exception ex)
         {
-            _consoleLogger.Enqueue($"[TIMER ERROR] Failed to save changes: {ex.Message}");
+            _consoleLogger.Enqueue($"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException}");
         }
     }
 
@@ -72,8 +72,10 @@ public class FileProcessor : IDisposable
             foreach (var filePath in allFiles)
             {
                 _consoleLogger.Enqueue($"Processing {filePath}");
-                ProcessFile(filePath);
-
+                lock (_dbSaveLock)
+                {
+                    ProcessFile(filePath);
+                }
                 processedCount++;
             }
 
@@ -99,7 +101,7 @@ public class FileProcessor : IDisposable
             if (!fileInfo.Exists) return;
 
             var (ntfsFileID, volumeSerialNumber) = FileIdentifier.GetNTFSFileID(filePath);
-            FileIdentityKey fileIdentityKey = new (ntfsFileID, volumeSerialNumber);
+            FileIdentityKey fileIdentityKey = new(ntfsFileID, volumeSerialNumber);
 
             DateTime currentTime = DateTime.UtcNow;
             bool isNewRecord = false;
@@ -111,118 +113,36 @@ public class FileProcessor : IDisposable
             {
                 fileHash = ComputeHashOrImportFromOldDb(filePath, fileIdentityKey);
 
-                if (_dataStore.HashMap.TryGetValue(fileHash, out var existingRecord))
-                {
-                    fileRecord = _context.FileRecords
-                        .Include(f => f.Locations)
-                        .Include(f => f.Identities)
-                        .Include(f => f.NameHistories)
-                        .FirstOrDefault(f => f.FileRecordId == existingRecord.FileRecordId);
+                fileRecord = GetFileRecordByHashIfExists(fileHash);
 
-                    if (FileHasSameHashInDbButDifferentIdentity(fileIdentityKey, fileRecord))
+                if (FoundFileRecordByHashButDifferentIdentity(fileIdentityKey, fileRecord))
+                {
+                    var newIdentity = new FileIdentity
                     {
-                        var newIdentity = new FileIdentity
-                        {
-                            VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
-                            NTFSFileID = fileIdentityKey.NTFSFileID,
-                            FileRecordId = fileRecord.FileRecordId
-                        };
-                        _context.FileIdentities.Add(newIdentity);
-                        _dataStore.IdentityMap[fileIdentityKey] = newIdentity;
-                    }
+                        VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
+                        NTFSFileID = fileIdentityKey.NTFSFileID,
+                        FileRecordId = fileRecord!.FileRecordId
+                    };
+                    _context.FileIdentities.Add(newIdentity);
+                    _dataStore.IdentityMap[fileIdentityKey] = newIdentity;
                 }
+
             }
 
             if (fileRecord == null)
             {
-                fileHash ??= FileHasher.ComputeFileHash(filePath);
-
-                fileRecord = new FileRecord
-                {
-                    Hash = fileHash,
-                    CurrentFileName = fileInfo.Name,
-                    Size = fileInfo.Length,
-                    LastWriteTime = fileInfo.LastWriteTimeUtc,
-                    FirstSeen = currentTime,
-                    LastSeen = currentTime,
-                    Locations = [],
-                    Identities = [],
-                    NameHistories = []
-                };
-
-                var newIdentity = new FileIdentity
-                {
-                    VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
-                    NTFSFileID = fileIdentityKey.NTFSFileID,
-                    FileRecord = fileRecord
-                };
-
-                fileRecord.Identities.Add(newIdentity);
-                _context.FileRecords.Add(fileRecord);
-                _context.FileIdentities.Add(newIdentity);
-                _dataStore.IdentityMap[fileIdentityKey] = newIdentity;
-
-                if (!_dataStore.HashMap.ContainsKey(fileHash))
-                {
-                    _dataStore.HashMap[fileHash] = fileRecord;
-                }
-
                 isNewRecord = true;
 
-                var initialNameHistory = new FileNamesHistory
-                {
-                    FileName = fileInfo.Name,
-                    NameChangeNoticedTime = currentTime,
-                    FileRecordId = fileRecord.FileRecordId
-                };
-                _context.FileNamesHistory.Add(initialNameHistory);
-                fileRecord.NameHistories.Add(initialNameHistory);
+                fileHash ??= FileHasher.ComputeFileHash(filePath);
+
+                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(fileInfo, fileIdentityKey, currentTime, fileHash);
             }
             else
             {
-                fileRecord.LastSeen = currentTime;
-                fileRecord.Size = fileInfo.Length;
-
-                if (fileRecord.LastWriteTime != fileInfo.LastWriteTimeUtc || fileRecord.Size != fileInfo.Length)
-                {
-                    string newHash = FileHasher.ComputeFileHash(filePath);
-                    if (fileRecord.Hash != newHash)
-                    {
-                        fileRecord.Hash = newHash;
-                        if (!_dataStore.HashMap.ContainsKey(newHash))
-                        {
-                            _dataStore.HashMap[newHash] = fileRecord;
-                        }
-                    }
-                    fileRecord.LastWriteTime = fileInfo.LastWriteTimeUtc;
-                }
-
-                if (!fileRecord.CurrentFileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    fileRecord.CurrentFileName = fileInfo.Name;
-
-                    var nameHistory = new FileNamesHistory
-                    {
-                        FileName = fileInfo.Name,
-                        NameChangeNoticedTime = currentTime,
-                        FileRecordId = fileRecord.FileRecordId
-                    };
-                    _context.FileNamesHistory.Add(nameHistory);
-                    fileRecord.NameHistories.Add(nameHistory);
-                }
+                UpdateFileRecordIfDifferencesInNameOrContentFound(filePath, fileInfo, currentTime, fileRecord);
             }
 
-            if (!fileRecord.Locations.Any(l => l.Path.Equals(filePath)))
-            {
-                var newLocation = new FileLocationsHistory
-                {
-                    Path = filePath,
-                    FileRecordId = fileRecord.FileRecordId,
-                    LocationChangeNoticedTime = currentTime
-                };
-                _context.FileLocationsHistory.Add(newLocation);
-                fileRecord.Locations.Add(newLocation);
-            }
+            UpdateFileLocationIfMoved(filePath, currentTime, fileRecord);
 
             if (!isNewRecord)
             {
@@ -236,9 +156,116 @@ public class FileProcessor : IDisposable
         }
     }
 
-    private bool FileHasSameHashInDbButDifferentIdentity(FileIdentityKey fileIdentityKey, FileRecord? fileRecord)
+    private void UpdateFileLocationIfMoved(Models.Path filePath, DateTime currentTime, FileRecord fileRecord)
     {
-        return fileRecord != null && !_dataStore.IdentityMap.ContainsKey(fileIdentityKey);
+        var mostRecentLocationInDB = fileRecord.Locations.Count != 0 ? fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) : null;
+        // if mostRecentLocationInDB is null then there are no locations in db
+        if (mostRecentLocationInDB is null || System.IO.Path.GetDirectoryName(filePath) != mostRecentLocationInDB.Path )
+        {
+            var newLocation = new FileLocationsHistory
+            {
+                Path = System.IO.Path.GetDirectoryName(filePath),
+                FileRecordId = fileRecord.FileRecordId,
+                LocationChangeNoticedTime = currentTime
+            };
+            _context.FileLocationsHistory.Add(newLocation);
+            fileRecord.Locations.Add(newLocation);
+        }
+    }
+
+    private void UpdateFileRecordIfDifferencesInNameOrContentFound(Models.Path filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    {
+        fileRecord.LastSeen = currentTime;
+        fileRecord.Size = fileInfo.Length;
+
+        if (fileRecord.LastWriteTime != fileInfo.LastWriteTimeUtc || fileRecord.Size != fileInfo.Length)
+        {
+            string newHash = FileHasher.ComputeFileHash(filePath);
+            if (fileRecord.Hash != newHash)
+            {
+                fileRecord.Hash = newHash;
+                if (!_dataStore.HashMap.ContainsKey(newHash))
+                {
+                    _dataStore.HashMap[newHash] = fileRecord;
+                }
+            }
+            fileRecord.LastWriteTime = fileInfo.LastWriteTimeUtc;
+        }
+
+        if (!fileRecord.CurrentFileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            fileRecord.CurrentFileName = fileInfo.Name;
+
+            var nameHistory = new FileNamesHistory
+            {
+                FileName = fileInfo.Name,
+                NameChangeNoticedTime = currentTime,
+                FileRecordId = fileRecord.FileRecordId
+            };
+            _context.FileNamesHistory.Add(nameHistory);
+            fileRecord.NameHistories.Add(nameHistory);
+        }
+    }
+
+    private FileRecord CreateNewFileRecordWithNameHistoryAndIdentity(FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime, string fileHash)
+    {
+        FileRecord fileRecord = new FileRecord
+        {
+            Hash = fileHash,
+            CurrentFileName = fileInfo.Name,
+            Size = fileInfo.Length,
+            LastWriteTime = fileInfo.LastWriteTimeUtc,
+            FirstSeen = currentTime,
+            LastSeen = currentTime,
+            Locations = [],
+            Identities = [],
+            NameHistories = []
+        };
+
+        var newIdentity = new FileIdentity
+        {
+            VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
+            NTFSFileID = fileIdentityKey.NTFSFileID,
+            FileRecord = fileRecord
+        };
+
+        fileRecord.Identities.Add(newIdentity);
+        _context.FileRecords.Add(fileRecord);
+        _context.FileIdentities.Add(newIdentity);
+        _dataStore.IdentityMap[fileIdentityKey] = newIdentity;
+
+        if (!_dataStore.HashMap.ContainsKey(fileHash))
+        {
+            _dataStore.HashMap[fileHash] = fileRecord;
+        }
+
+        var initialNameHistory = new FileNamesHistory
+        {
+            FileName = fileInfo.Name,
+            NameChangeNoticedTime = currentTime,
+            FileRecordId = fileRecord.FileRecordId
+        };
+        _context.FileNamesHistory.Add(initialNameHistory);
+        fileRecord.NameHistories.Add(initialNameHistory);
+        return fileRecord;
+    }
+
+    private FileRecord? GetFileRecordByHashIfExists(string fileHash)
+    {
+        if (_dataStore.HashMap.TryGetValue(fileHash, out var existingRecord))
+        {
+            return _context.FileRecords
+                .Include(f => f.Locations)
+                .Include(f => f.Identities)
+                .Include(f => f.NameHistories)
+                .FirstOrDefault(f => f.FileRecordId == existingRecord.FileRecordId, null);
+        }
+        return null;
+    }
+
+    private bool FoundFileRecordByHashButDifferentIdentity(FileIdentityKey fileIdentityKey, FileRecord? fileRecord)
+    {
+        return fileRecord is not null && !_dataStore.IdentityMap.ContainsKey(fileIdentityKey);
     }
 
     private string ComputeHashOrImportFromOldDb(Models.Path filePath, FileIdentityKey fileIdentityKey)
