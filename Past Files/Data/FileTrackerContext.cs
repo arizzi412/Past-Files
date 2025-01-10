@@ -7,28 +7,27 @@ using Past_Files.Models;
 
 namespace Past_Files.Data;
 
-public class FileTrackerContext : DbContext
+public class FileTrackerContext(string dbName) : DbContext
 {
     public DbSet<FileRecord> FileRecords { get; set; } = null!;
-    public DbSet<FileLocationHistory> FileLocations { get; set; } = null!;
+    public DbSet<FileLocationsHistory> FileLocationsHistory { get; set; } = null!;
     public DbSet<FileIdentity> FileIdentities { get; set; } = null!;
-    public DbSet<FileNameHistory> FileNameHistories { get; set; } = null!;
+    public DbSet<FileNamesHistory> FileNamesHistory { get; set; } = null!;
 
-    public static readonly ILoggerFactory MyLoggerFactory
-        = LoggerFactory.Create(builder =>
-        {
-            builder.AddSerilog(Log.Logger); // Pass the global Serilog logger
-            builder.AddConsole(); // Requires Microsoft.Extensions.Logging.Console
-        });
+    //public static readonly ILoggerFactory MyLoggerFactory
+    //    = LoggerFactory.Create(builder =>
+    //    {
+    //        builder.AddSerilog(Log.Logger); // Pass the global Serilog logger
+    //        builder.AddConsole(); // Requires Microsoft.Extensions.Logging.Console
+    //    });
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
         => options
-            .UseSqlite("Data Source=filetracker.db");
-         //   .UseLoggerFactory(MyLoggerFactory) // Attach the logger
-         //   .EnableSensitiveDataLogging(); // Enable sensitive data (for debugging only)
+            .UseSqlite($"Data Source={dbName}");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // FileRecord configuration
         modelBuilder.Entity<FileRecord>(entity =>
         {
             entity.HasKey(e => e.FileRecordId);
@@ -53,6 +52,7 @@ public class FileTrackerContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // FileIdentity configuration
         modelBuilder.Entity<FileIdentity>(entity =>
         {
             entity.HasKey(e => e.FileIdentityId);
@@ -63,14 +63,24 @@ public class FileTrackerContext : DbContext
                   .IsUnique();
         });
 
-        modelBuilder.Entity<FileLocationHistory>(entity =>
+        // FileLocationsHistory configuration
+        modelBuilder.Entity<FileLocationsHistory>(entity =>
         {
             entity.HasKey(e => e.FileLocationId);
             entity.Property(e => e.FileLocationId)
                   .ValueGeneratedOnAdd();
+
+            // Configure Path as a value object stored as a string
+            entity.Property(e => e.Path)
+                  .HasConversion(
+                      path => path.NormalizedPath, // Path object -> string (for DB)
+                      value => new Models.Path(value)     // string (from DB) -> Path object
+                  )
+                  .IsRequired(); // Ensure the path is not null
         });
 
-        modelBuilder.Entity<FileNameHistory>(entity =>
+        // FileNamesHistory configuration
+        modelBuilder.Entity<FileNamesHistory>(entity =>
         {
             entity.HasKey(e => e.FileNameHistoryId);
             entity.Property(e => e.FileNameHistoryId)

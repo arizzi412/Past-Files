@@ -19,7 +19,7 @@ public class FileRecord
     public DateTime FirstSeen { get; set; }
     public DateTime LastSeen { get; set; }
 
-    public List<FileLocationHistory> Locations { get; set; } = [];
+    public List<FileLocationsHistory> Locations { get; set; } = [];
     public List<FileIdentity> Identities { get; set; } = [];
-    public List<FileNameHistory> NameHistories { get; set; } = [];
+    public List<FileNamesHistory> NameHistories { get; set; } = [];
 }

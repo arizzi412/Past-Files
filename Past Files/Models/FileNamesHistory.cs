@@ -5,7 +5,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Past_Files.Models;
 
-public class FileNameHistory
+public class FileNamesHistory
 {
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

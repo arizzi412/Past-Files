@@ -32,7 +32,7 @@ public static partial class FileIdentifier
     /// </summary>
     /// <param name="filePath">The full path of the file.</param>
     /// <returns>A tuple containing the FileID and VolumeSerialNumber.</returns>
-    public static (ulong FileID, uint VolumeSerialNumber) GetNTFSFileID(string filePath)
+    public static (ulong, uint) GetNTFSFileID(string filePath)
     {
         using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         var handle = fileStream.SafeFileHandle;
