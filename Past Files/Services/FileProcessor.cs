@@ -160,11 +160,12 @@ public class FileProcessor : IDisposable
     {
         var mostRecentLocationInDB = fileRecord.Locations.Count != 0 ? fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) : null;
         // if mostRecentLocationInDB is null then there are no locations in db
-        if (mostRecentLocationInDB is null || System.IO.Path.GetDirectoryName(filePath) != mostRecentLocationInDB.Path )
+        if (mostRecentLocationInDB is null 
+            || !System.IO.Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path.NormalizedPath.AsSpan()))
         {
             var newLocation = new FileLocationsHistory
             {
-                Path = System.IO.Path.GetDirectoryName(filePath),
+                Path = System.IO.Path.GetDirectoryName(filePath) ?? string.Empty,
                 FileRecordId = fileRecord.FileRecordId,
                 LocationChangeNoticedTime = currentTime
             };
@@ -209,7 +210,7 @@ public class FileProcessor : IDisposable
 
     private FileRecord CreateNewFileRecordWithNameHistoryAndIdentity(FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime, string fileHash)
     {
-        FileRecord fileRecord = new FileRecord
+        FileRecord fileRecord = new()
         {
             Hash = fileHash,
             CurrentFileName = fileInfo.Name,
@@ -222,7 +223,7 @@ public class FileProcessor : IDisposable
             NameHistories = []
         };
 
-        var newIdentity = new FileIdentity
+        FileIdentity newIdentity = new()
         {
             VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
             NTFSFileID = fileIdentityKey.NTFSFileID,
@@ -280,12 +281,8 @@ public class FileProcessor : IDisposable
 
     private static FileRecord? TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, DataStore dataStore)
     {
-        if (dataStore.IdentityMap.TryGetValue(fileIdentityKey, out var identity))
-        {
-            return identity.FileRecord;
-        }
-
-        return null;
+        dataStore.IdentityMap.TryGetValue(fileIdentityKey, out var identity);
+        return identity?.FileRecord;
     }
 
     public void Dispose()
