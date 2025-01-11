@@ -3,6 +3,7 @@ using Past_Files.Data;
 using Past_Files.FileUtils;
 using Past_Files.Models;
 using Serilog;
+using System.Diagnostics;
 
 namespace Past_Files.Services;
 
@@ -15,18 +16,13 @@ public class FileProcessor : IDisposable
 
     private readonly ConsoleLoggerService _consoleLogger;
     private readonly int _saveIntervalInSeconds;
-    private readonly Timer _autoSaveTimer;
     private readonly Lock _dbSaveLock = new();
+    private readonly string errorFile = Environment.CurrentDirectory + @"\errors.txt";
 
     public FileProcessor(FileTrackerContext context, DBImportInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 20, ConsoleLoggerService? logger = null)
     {
         _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 20;
         _consoleLogger = logger ?? new ConsoleLoggerService();
-
-        _autoSaveTimer = new Timer(SaveChangesCallback, null,
-            TimeSpan.FromSeconds(_saveIntervalInSeconds),
-            TimeSpan.FromSeconds(_saveIntervalInSeconds));
-
 
         _context = context;
         _dataStore = new DataStore(_consoleLogger);
@@ -35,7 +31,7 @@ public class FileProcessor : IDisposable
 
     }
 
-    private void SaveChangesCallback(object? state)
+    private void SaveChangesCallback()
     {
         try
         {
@@ -50,7 +46,9 @@ public class FileProcessor : IDisposable
         }
         catch (Exception ex)
         {
-            _consoleLogger.Enqueue($"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException}");
+            string message = $"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException}\n";
+            _consoleLogger.Enqueue(message);
+            File.AppendAllTextAsync(errorFile, message);
         }
     }
 
@@ -68,28 +66,30 @@ public class FileProcessor : IDisposable
 
             _dataStore.LoadRecords(_context);
 
+            Stopwatch stopwatch = Stopwatch.StartNew();
             int processedCount = 0;
+
             foreach (var filePath in allFiles)
             {
                 _consoleLogger.Enqueue($"Processing {filePath}");
-                lock (_dbSaveLock)
-                {
-                    ProcessFile(filePath);
-                }
-                processedCount++;
-            }
 
-            lock (_dbSaveLock)
-            {
-                _context.SaveChanges();
+                ProcessFile(filePath);
+
+                processedCount++;
+                if (stopwatch.ElapsedMilliseconds > _saveIntervalInSeconds * 1000)
+                {
+                    SaveChangesCallback();
+                    stopwatch.Restart();
+                }
             }
 
             _consoleLogger.Enqueue($"Scan complete. Processed {processedCount} files.");
         }
         catch (Exception ex)
         {
-            _consoleLogger.Enqueue($"Error scanning directory '{directoryPath}': {ex.Message}");
-            Log.Error(ex, $"Error scanning directory '{directoryPath}'");
+            string errorMessage = $"Error scanning directory '{directoryPath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            _consoleLogger.Enqueue(errorMessage);
+            File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
@@ -151,8 +151,9 @@ public class FileProcessor : IDisposable
         }
         catch (Exception ex)
         {
-            _consoleLogger.Enqueue($"Error processing file '{filePath}': {ex.Message}");
-            Log.Error(ex, $"Error processing file '{filePath}'");
+            string errorMessage = $"Error processing file '{filePath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            _consoleLogger.Enqueue(errorMessage);
+            File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
@@ -160,7 +161,7 @@ public class FileProcessor : IDisposable
     {
         var mostRecentLocationInDB = fileRecord.Locations.Count != 0 ? fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) : null;
         // if mostRecentLocationInDB is null then there are no locations in db
-        if (mostRecentLocationInDB is null 
+        if (mostRecentLocationInDB is null
             || !System.IO.Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path.NormalizedPath.AsSpan()))
         {
             var newLocation = new FileLocationsHistory
@@ -259,7 +260,7 @@ public class FileProcessor : IDisposable
                 .Include(f => f.Locations)
                 .Include(f => f.Identities)
                 .Include(f => f.NameHistories)
-                .FirstOrDefault(f => f.FileRecordId == existingRecord.FileRecordId, null);
+                .FirstOrDefault(f => f.FileRecordId == existingRecord.FileRecordId);
         }
         return null;
     }
@@ -287,7 +288,6 @@ public class FileProcessor : IDisposable
 
     public void Dispose()
     {
-        _autoSaveTimer.Dispose();
         _consoleLogger.Dispose();
 
         lock (_dbSaveLock)
