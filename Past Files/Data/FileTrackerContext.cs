@@ -74,7 +74,7 @@ public class FileTrackerContext(string dbName) : DbContext
             entity.Property(e => e.Path)
                   .HasConversion(
                       path => path.NormalizedPath, // Path object -> string (for DB)
-                      value => new Models.Path(value)     // string (from DB) -> Path object
+                      value => new Models.FilePath(value)     // string (from DB) -> Path object
                   )
                   .IsRequired(); // Ensure the path is not null
         });

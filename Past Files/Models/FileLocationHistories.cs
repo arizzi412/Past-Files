@@ -14,7 +14,7 @@ public class FileLocationsHistory
     public DateTime LocationChangeNoticedTime { get; set; }
 
     // Path is a value object
-    public Path? Path { get; set; }
+    public FilePath? Path { get; set; }
 
     // Navigation property to FileRecord
     public FileRecord? FileRecord { get; set; }

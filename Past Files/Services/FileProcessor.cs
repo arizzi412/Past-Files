@@ -2,7 +2,6 @@
 using Past_Files.Data;
 using Past_Files.FileUtils;
 using Past_Files.Models;
-using Serilog;
 using System.Diagnostics;
 
 namespace Past_Files.Services;
@@ -10,25 +9,23 @@ namespace Past_Files.Services;
 public class FileProcessor : IDisposable
 {
 
-    private readonly DataStore _dataStore;
+    private readonly IDataStore _dataStore;
     private readonly DBImportInfo? OldDBImportInfo;
     private readonly FileTrackerContext _context;
 
-    private readonly ConsoleLoggerService _consoleLogger;
+    private readonly IConcurrentLoggerService _logger;
     private readonly int _saveIntervalInSeconds;
     private readonly Lock _dbSaveLock = new();
     private readonly string errorFile = Environment.CurrentDirectory + @"\errors.txt";
 
-    public FileProcessor(FileTrackerContext context, DBImportInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 20, ConsoleLoggerService? logger = null)
+    public FileProcessor(FileTrackerContext context, IDataStore dataStore, IConcurrentLoggerService logger, DBImportInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 20)
     {
         _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 20;
-        _consoleLogger = logger ?? new ConsoleLoggerService();
-
+        _logger = logger;
         _context = context;
-        _dataStore = new DataStore(_consoleLogger);
+        _dataStore = dataStore;
 
         OldDBImportInfo = oldDBHashImportInfo;
-
     }
 
     private void SaveChangesCallback()
@@ -40,38 +37,28 @@ public class FileProcessor : IDisposable
                 if (_context.ChangeTracker.HasChanges())
                 {
                     _context.SaveChanges();
-                    _consoleLogger.Enqueue($"[TIMER] Auto-saved changes at {DateTime.UtcNow:u}");
+                    _logger.Enqueue($"[TIMER] Auto-saved changes at {DateTime.UtcNow:u}");
                 }
             }
         }
         catch (Exception ex)
         {
             string message = $"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException}\n";
-            _consoleLogger.Enqueue(message);
+            _logger.Enqueue(message);
             File.AppendAllTextAsync(errorFile, message);
         }
     }
 
-    public void ScanDirectory(string directoryPath)
+    public void ScanFiles(FilePath[] filePaths)
     {
         try
         {
-            Models.Path[] allFiles = Directory.EnumerateFiles(directoryPath, "*", new EnumerationOptions
-            {
-                IgnoreInaccessible = true,
-                RecurseSubdirectories = true
-            }).Select(x => new Models.Path(x)).ToArray();
-
-            _consoleLogger.Enqueue($"Total files to process: {allFiles.Length}");
-
-            _dataStore.LoadRecords(_context);
-
             Stopwatch stopwatch = Stopwatch.StartNew();
             int processedCount = 0;
 
-            foreach (var filePath in allFiles)
+            foreach (var filePath in filePaths)
             {
-                _consoleLogger.Enqueue($"Processing {filePath}");
+                _logger.Enqueue($"Processing {filePath}");
 
                 ProcessFile(filePath);
 
@@ -83,17 +70,17 @@ public class FileProcessor : IDisposable
                 }
             }
 
-            _consoleLogger.Enqueue($"Scan complete. Processed {processedCount} files.");
+            _logger.Enqueue($"Scan complete. Processed {processedCount} files.");
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error scanning directory '{directoryPath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
-            _consoleLogger.Enqueue(errorMessage);
+            string errorMessage = $"Error during scanning: {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            _logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
-    public void ProcessFile(Models.Path filePath)
+    public void ProcessFile(Models.FilePath filePath)
     {
         try
         {
@@ -152,12 +139,12 @@ public class FileProcessor : IDisposable
         catch (Exception ex)
         {
             string errorMessage = $"Error processing file '{filePath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
-            _consoleLogger.Enqueue(errorMessage);
+            _logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
-    private void UpdateFileLocationIfMoved(Models.Path filePath, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateFileLocationIfMoved(Models.FilePath filePath, DateTime currentTime, FileRecord fileRecord)
     {
         var mostRecentLocationInDB = fileRecord.Locations.Count != 0 ? fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) : null;
         // if mostRecentLocationInDB is null then there are no locations in db
@@ -175,7 +162,7 @@ public class FileProcessor : IDisposable
         }
     }
 
-    private void UpdateFileRecordIfDifferencesInNameOrContentFound(Models.Path filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateFileRecordIfDifferencesInNameOrContentFound(Models.FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
     {
         fileRecord.LastSeen = currentTime;
         fileRecord.Size = fileInfo.Length;
@@ -186,9 +173,9 @@ public class FileProcessor : IDisposable
             if (fileRecord.Hash != newHash)
             {
                 fileRecord.Hash = newHash;
-                if (!_dataStore.HashMap.ContainsKey(newHash))
+                if (!_dataStore.HashToFileRecord.ContainsKey(newHash))
                 {
-                    _dataStore.HashMap[newHash] = fileRecord;
+                    _dataStore.HashToFileRecord[newHash] = fileRecord;
                 }
             }
             fileRecord.LastWriteTime = fileInfo.LastWriteTimeUtc;
@@ -236,9 +223,9 @@ public class FileProcessor : IDisposable
         _context.FileIdentities.Add(newIdentity);
         _dataStore.IdentityMap[fileIdentityKey] = newIdentity;
 
-        if (!_dataStore.HashMap.ContainsKey(fileHash))
+        if (!_dataStore.HashToFileRecord.ContainsKey(fileHash))
         {
-            _dataStore.HashMap[fileHash] = fileRecord;
+            _dataStore.HashToFileRecord[fileHash] = fileRecord;
         }
 
         var initialNameHistory = new FileNamesHistory
@@ -254,7 +241,7 @@ public class FileProcessor : IDisposable
 
     private FileRecord? GetFileRecordByHashIfExists(string fileHash)
     {
-        if (_dataStore.HashMap.TryGetValue(fileHash, out var existingRecord))
+        if (_dataStore.HashToFileRecord.TryGetValue(fileHash, out var existingRecord))
         {
             return _context.FileRecords
                 .Include(f => f.Locations)
@@ -270,7 +257,7 @@ public class FileProcessor : IDisposable
         return fileRecord is not null && !_dataStore.IdentityMap.ContainsKey(fileIdentityKey);
     }
 
-    private string ComputeHashOrImportFromOldDb(Models.Path filePath, FileIdentityKey fileIdentityKey)
+    private string ComputeHashOrImportFromOldDb(Models.FilePath filePath, FileIdentityKey fileIdentityKey)
     {
         if (OldDBImportInfo is not null)
         {
@@ -280,7 +267,7 @@ public class FileProcessor : IDisposable
         return FileHasher.ComputeFileHash(filePath);
     }
 
-    private static FileRecord? TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, DataStore dataStore)
+    private static FileRecord? TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, IDataStore dataStore)
     {
         dataStore.IdentityMap.TryGetValue(fileIdentityKey, out var identity);
         return identity?.FileRecord;
@@ -288,7 +275,7 @@ public class FileProcessor : IDisposable
 
     public void Dispose()
     {
-        _consoleLogger.Dispose();
+        _logger.Dispose();
 
         lock (_dbSaveLock)
         {

@@ -4,38 +4,54 @@ using Past_Files.Models;
 using Past_Files.Services;
 using Serilog;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Past_Files
 {
-    public class DataStore(ConsoleLoggerService consoleLoggerService)
+    public class DataStore : IDataStore
     {
-        private readonly ConsoleLoggerService _consoleLogger = consoleLoggerService;
+        private readonly IConcurrentLoggerService _consoleLogger;
+
+        public ConcurrentDictionary<FileIdentityKey, FileIdentity> IdentityMap { get; private set; }
+        public ConcurrentDictionary<string, FileRecord> HashToFileRecord { get; private set; }
+
+        public static DataStore CreateDataStore(FileTrackerContext fileTrackerContext, IConcurrentLoggerService consoleLoggerService)
+        {
+            var ds = new DataStore(consoleLoggerService);
+            ds.LoadRecords(fileTrackerContext);
+            return ds;
+        }
 
 
-        public Dictionary<FileIdentityKey, FileIdentity> IdentityMap { get; set; } = [];
-        public Dictionary<string, FileRecord> HashMap { get; set; } = [];
+        private DataStore(IConcurrentLoggerService consoleLoggerService)
+        {
+            _consoleLogger = consoleLoggerService;
+            IdentityMap = new ConcurrentDictionary<FileIdentityKey, FileIdentity>();
+            HashToFileRecord = new ConcurrentDictionary<string, FileRecord>();
+        }
 
-
-        public void LoadRecords(FileTrackerContext _context)
+        private void LoadRecords(FileTrackerContext context)
         {
             _consoleLogger.Enqueue("Loading database into memory");
             try
             {
-                var identities = _context.FileIdentities
+                // Load and populate IdentityMap
+                var identities = context.FileIdentities
                     .Include(i => i.FileRecord)
                     .AsNoTracking()
                     .ToList();
 
-                IdentityMap = identities.ToDictionary(
-                    i => new FileIdentityKey(i.NTFSFileID, i.VolumeSerialNumber),
-                    i => i
+                IdentityMap = new ConcurrentDictionary<FileIdentityKey, FileIdentity>(
+                    identities.Select(i => new KeyValuePair<FileIdentityKey, FileIdentity>(
+                        new FileIdentityKey(i.NTFSFileID, i.VolumeSerialNumber),
+                        i
+                    ))
                 );
 
-                var fileRecords = _context.FileRecords
+                // Load and populate HashToFileRecord
+                var fileRecords = context.FileRecords
                     .AsNoTracking()
                     .Include(f => f.Locations)
                     .Include(f => f.Identities)
@@ -44,7 +60,9 @@ namespace Past_Files
                     .AsSplitQuery()
                     .ToList();
 
-                HashMap = fileRecords.ToDictionary(f => f.Hash, f => f);
+                HashToFileRecord = new ConcurrentDictionary<string, FileRecord>(
+                    fileRecords.Select(f => new KeyValuePair<string, FileRecord>(f.Hash, f))
+                );
             }
             catch (Exception ex)
             {
@@ -53,6 +71,4 @@ namespace Past_Files
             }
         }
     }
-
-           
-    }
+}

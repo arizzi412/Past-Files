@@ -4,7 +4,7 @@ using System.IO;
 
 namespace Past_Files.Models;
 
-public class Path
+public class FilePath
 {
     private string _normalizedPath; // Backing field for the property
     public string NormalizedPath
@@ -13,9 +13,9 @@ public class Path
         private set => _normalizedPath = NormalizePath(value);
     }
 
-    private Path() { } // Required for EF Core materialization
+    private FilePath() { } // Required for EF Core materialization
 
-    public Path(string path)
+    public FilePath(string path)
     {
         NormalizedPath = path;
     }
@@ -26,7 +26,7 @@ public class Path
 
     public override bool Equals(object? obj)
     {
-        if (obj is Path other)
+        if (obj is FilePath other)
         {
             return NormalizedPath.Equals(other.NormalizedPath);
         }
@@ -35,12 +35,12 @@ public class Path
 
     public override int GetHashCode() => NormalizedPath.GetHashCode();
 
-    public static implicit operator Path(string v)
+    public static implicit operator FilePath(string v)
     {
-        return new Path(v);
+        return new FilePath(v);
     }
 
-    public static implicit operator string(Path v)
+    public static implicit operator string(FilePath v)
     {
         return v.NormalizedPath;
     }

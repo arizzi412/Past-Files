@@ -13,8 +13,7 @@ namespace Past_Files.Services
         {
             consoleLoggerService.Enqueue("Reading data from import database");
             ImportedDbContext = new FileTrackerContext(dbName);
-            dataStore = new DataStore(consoleLoggerService);
-            dataStore.LoadRecords(ImportedDbContext);
+            dataStore =  DataStore.CreateDataStore(ImportedDbContext, consoleLoggerService);
         }
     }
 }
