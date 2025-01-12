@@ -1,6 +1,7 @@
 ﻿using CommandLine;
 using Past_Files.Models;
 using Past_Files.Services;
+using System.Diagnostics;
 
 namespace Past_Files
 {
@@ -8,6 +9,8 @@ namespace Past_Files
     {
         public static void Main(string[] args)
         {
+            Stopwatch sw = Stopwatch.StartNew();
+
             // Initialize the console logger service
             using var loggerService = new ConsoleLoggerService();
 
@@ -54,11 +57,12 @@ namespace Past_Files
             // Start the scanning process
             loggerService.Enqueue("Starting scan...");
 
-
             var task1 = Task.Run(() => processor.ScanFiles(filePaths[0]));
             var task2 = Task.Run(() => processor2.ScanFiles(filePaths[1]));
 
             Task.WaitAll(task1, task2);
+            sw.Stop();
+            Console.WriteLine($"Scan took {sw.ElapsedMilliseconds / 1000}");
 
             loggerService.Enqueue("Scan completed. Database Updated.");
 
