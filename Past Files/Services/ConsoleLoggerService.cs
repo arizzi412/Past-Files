@@ -1,7 +1,7 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace Past_Files.Services
@@ -11,74 +11,95 @@ namespace Past_Files.Services
     /// </summary>
     public class ConsoleLoggerService : IDisposable, IConcurrentLoggerService
     {
-        private readonly BlockingCollection<string> _messageQueue = new(new ConcurrentQueue<string>());
+        private readonly Channel<string> _messageChannel;
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _loggerTask;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ConsoleLoggerService"/> class.
+        /// </summary>
         public ConsoleLoggerService()
         {
+            // Create an unbounded channel with single reader for better performance
+            var options = new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = false
+            };
+            _messageChannel = Channel.CreateUnbounded<string>(options);
+
             // Start the background logging task
-            _loggerTask = Task.Run(async () => await ProcessQueueAsync(_cts.Token));
+            _loggerTask = Task.Run(() => ProcessQueueAsync(_cts.Token));
         }
 
         /// <summary>
         /// Enqueue a message for asynchronous console logging.
         /// </summary>
+        /// <param name="message">The log message.</param>
         public void Enqueue(string message)
         {
-            _messageQueue.Add(message);
+            if (!_messageChannel.Writer.TryWrite(message))
+            {
+                // Handle cases where the channel is full or completed
+                throw new InvalidOperationException("Unable to enqueue log message.");
+            }
         }
 
         /// <summary>
         /// Main loop that processes the queue and writes to the console in batches.
         /// </summary>
+        /// <param name="token">Cancellation token.</param>
         private async Task ProcessQueueAsync(CancellationToken token)
         {
-            var batch = new List<string>();
-            while (!token.IsCancellationRequested)
+            var reader = _messageChannel.Reader;
+
+            try
             {
-                try
+                while (await reader.WaitToReadAsync(token))
                 {
-                    // Block until at least one message is available or cancellation requested
-                    var message = _messageQueue.Take(token);
-
-                    // Start building a batch
-                    batch.Add(message);
-
-                    // Now grab as many more messages as are immediately available
-                    while (_messageQueue.TryTake(out var nextMessage))
+                    while (reader.TryRead(out var message))
                     {
-                        batch.Add(nextMessage);
+                        Console.WriteLine(message);
                     }
 
-                    // Print the collected messages
-                    foreach (var m in batch)
-                    {
-                        Console.WriteLine(m);
-                    }
-                    batch.Clear();
+                    // Optional: Implement time-based batching
+                    // You can add a delay or implement a timer to flush the batch periodically
                 }
-                catch (OperationCanceledException)
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during shutdown
+            }
+            finally
+            {
+                // Process any remaining messages
+                while (reader.TryRead(out var message))
                 {
-                    // Normal during shutdown
-                    break;
+                    Console.WriteLine(message);
                 }
             }
         }
 
+        /// <summary>
+        /// Disposes the logger service, ensuring all messages are processed.
+        /// </summary>
         public void Dispose()
         {
             _cts.Cancel();
-            _messageQueue.CompleteAdding();
+            _messageChannel.Writer.Complete();
+
             try
             {
                 _loggerTask.Wait();
             }
-            catch
+            catch (AggregateException ex) when (ex.InnerExceptions.All(e => e is OperationCanceledException))
             {
-                // Ignored
+                // Ignore cancellation exceptions
             }
-            _cts.Dispose();
+            finally
+            {
+                _cts.Dispose();
+            }
         }
     }
 }
