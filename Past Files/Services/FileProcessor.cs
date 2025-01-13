@@ -10,7 +10,7 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
 {
     private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 500;
     private readonly Lock _dbSaveLock = new();
-    private readonly string errorFile = Environment.CurrentDirectory + @"\errors.txt";
+    private readonly string errorFile = Environment.CurrentDirectory + @"\Scan errors.txt";
 
     private void SaveChangesCallback()
     {

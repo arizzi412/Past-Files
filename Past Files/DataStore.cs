@@ -23,7 +23,6 @@ namespace Past_Files
             return ds;
         }
 
-
         private DataStore(IConcurrentLoggerService consoleLoggerService)
         {
             _consoleLogger = consoleLoggerService;
@@ -35,9 +34,6 @@ namespace Past_Files
             _consoleLogger.Enqueue("Loading database into memory");
             try
             {
-
-
-                // Load and populate HashToFileRecord
                 var fileRecords = context.FileRecords
                     .AsNoTracking()
                     .Include(f => f.Locations)

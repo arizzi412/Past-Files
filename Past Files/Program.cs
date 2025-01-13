@@ -25,31 +25,36 @@ namespace Past_Files
                         loggerService.Enqueue($"Error parsing arguments: {error}");
                     }
                     loggerService.Enqueue("Malformed arguments.  Exiting.");
+                    return;
 
                 }).Value;
 
+            var rootDirectory = options.RootDirectory ?? Environment.CurrentDirectory;
 
-
-            var rootDirectory = options.RootDirectory ?? @"E:\Firaxis Games";
+            if (options.DatabasePath is not null)
+            {
+                ExitIfDBNotValid(options.DatabasePath, loggerService);
+            }
             var dbPath = options.DatabasePath ?? "filetracker.db";
             using var dbContext = new Data.FileTrackerContext(dbPath);
             dbContext.Database.EnsureCreated();
 
-            DBImportInfo dbImportInfo = null;
-            if (!string.IsNullOrWhiteSpace(options.OldDatabasePath))
+            DBImportInfo? dbImportInfo = null;
+
+            if (options.OldDatabasePath is not null)
             {
+                ExitIfDBNotValid(options.OldDatabasePath, loggerService);
+
                 dbImportInfo = DBImportInfo.CreateDBImportInfo(options.OldDatabasePath, loggerService);
             }
 
+
             var dataStore = DataStore.CreateDataStore(dbContext, loggerService);
 
-
-
-
-            FileProcessor processor = new FileProcessor(dbContext, dataStore, loggerService, dbImportInfo, saveIntervalInSeconds: 500);
+            FileProcessor processor = new(dbContext, dataStore, loggerService, dbImportInfo, saveIntervalInSeconds: 500);
 
             using var dbContext2 = new Data.FileTrackerContext(dbPath);
-            FileProcessor processor2 = new FileProcessor(dbContext2, dataStore, loggerService, dbImportInfo, saveIntervalInSeconds: 450);
+            FileProcessor processor2 = new(dbContext2, dataStore, loggerService, dbImportInfo, saveIntervalInSeconds: 450);
 
 
             // Start the scanning process
@@ -70,6 +75,23 @@ namespace Past_Files
             // Prompt to exit
             Console.WriteLine("\nPress any key to exit...");
             Console.ReadKey();
+        }
+
+        private static void ExitIfDBNotValid(string OldDatabasePath, ConsoleLoggerService loggerService)
+        {
+            if (OldDatabasePath == string.Empty)
+            {
+                loggerService.Enqueue($"Empty database: {OldDatabasePath}.  \nExiting.");
+                loggerService.Dispose();
+                return;
+            }
+
+            if (!File.Exists(OldDatabasePath))
+            {
+                loggerService.Enqueue($"Database doesn't exist: {OldDatabasePath}. \nExiting.");
+                loggerService.Dispose();
+                return;
+            }
         }
 
         private static void ScanSingleThreaded(string rootDirectory, FileProcessor processor)

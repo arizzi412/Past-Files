@@ -1,8 +1,8 @@
 ﻿using Past_Files.FileUtils;
-using Past_Files.Models;
+using Past_Files.Services;
 using System.IO;
 
-namespace Past_Files.Services
+namespace Past_Files.Models
 {
     public class FileInformation
     {
