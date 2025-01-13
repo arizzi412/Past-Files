@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+using Past_Files.Services;
 
 namespace Past_Files.FileUtils;
 
@@ -32,14 +33,14 @@ public static partial class FileIdentifier
     /// </summary>
     /// <param name="filePath">The full path of the file.</param>
     /// <returns>A tuple containing the FileID and VolumeSerialNumber.</returns>
-    public static (ulong, uint) GetNTFSFileID(string filePath)
+    public static FileIdentityKey GetFileIdentityKey(string filePath)
     {
         using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         var handle = fileStream.SafeFileHandle;
         if (GetFileInformationByHandle(handle, out BY_HANDLE_FILE_INFORMATION fileInfo))
         {
             ulong fileID = (ulong)fileInfo.FileIndexHigh << 32 | fileInfo.FileIndexLow;
-            return (fileID, fileInfo.VolumeSerialNumber);
+            return new(fileID, fileInfo.VolumeSerialNumber);
         }
         else
         {

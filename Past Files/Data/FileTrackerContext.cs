@@ -11,7 +11,6 @@ public class FileTrackerContext(string dbName) : DbContext
 {
     public DbSet<FileRecord> FileRecords { get; set; } = null!;
     public DbSet<FileLocationsHistory> FileLocationsHistory { get; set; } = null!;
-    public DbSet<FileIdentity> FileIdentities { get; set; } = null!;
     public DbSet<FileNamesHistory> FileNamesHistory { get; set; } = null!;
 
     //public static readonly ILoggerFactory MyLoggerFactory
@@ -41,26 +40,10 @@ public class FileTrackerContext(string dbName) : DbContext
                   .HasForeignKey(l => l.FileRecordId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasMany(e => e.Identities)
-                  .WithOne(i => i.FileRecord)
-                  .HasForeignKey(i => i.FileRecordId)
-                  .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasMany(e => e.NameHistories)
+            entity.HasMany(e => e.NameHistory)
                   .WithOne(n => n.FileRecord)
                   .HasForeignKey(n => n.FileRecordId)
                   .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // FileIdentity configuration
-        modelBuilder.Entity<FileIdentity>(entity =>
-        {
-            entity.HasKey(e => e.FileIdentityId);
-            entity.Property(e => e.FileIdentityId)
-                  .ValueGeneratedOnAdd();
-
-            entity.HasIndex(e => new { e.VolumeSerialNumber, e.NTFSFileID })
-                  .IsUnique();
         });
 
         // FileLocationsHistory configuration

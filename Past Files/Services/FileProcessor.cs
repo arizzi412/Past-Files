@@ -6,27 +6,11 @@ using System.Diagnostics;
 
 namespace Past_Files.Services;
 
-public class FileProcessor : IDisposable
+public class FileProcessor(FileTrackerContext context, IDataStore dataStore, IConcurrentLoggerService logger, DBImportInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 500) : IDisposable
 {
-
-    private readonly IDataStore _dataStore;
-    private readonly DBImportInfo? OldDBImportInfo;
-    private readonly FileTrackerContext _context;
-
-    private readonly IConcurrentLoggerService _logger;
-    private readonly int _saveIntervalInSeconds;
+    private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 500;
     private readonly Lock _dbSaveLock = new();
     private readonly string errorFile = Environment.CurrentDirectory + @"\errors.txt";
-
-    public FileProcessor(FileTrackerContext context, IDataStore dataStore, IConcurrentLoggerService logger, DBImportInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 20)
-    {
-        _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 20;
-        _logger = logger;
-        _context = context;
-        _dataStore = dataStore;
-
-        OldDBImportInfo = oldDBHashImportInfo;
-    }
 
     private void SaveChangesCallback()
     {
@@ -34,17 +18,17 @@ public class FileProcessor : IDisposable
         {
             lock (_dbSaveLock)
             {
-                if (_context.ChangeTracker.HasChanges())
+                if (context.ChangeTracker.HasChanges())
                 {
-                    _context.SaveChanges();
-                    _logger.Enqueue($"[TIMER] Auto-saved changes at {DateTime.UtcNow:u}");
+                    context.SaveChanges();
+                    logger.Enqueue($"[TIMER] Auto-saved changes at {DateTime.UtcNow:u}");
                 }
             }
         }
         catch (Exception ex)
         {
             string message = $"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException}\n";
-            _logger.Enqueue(message);
+            logger.Enqueue(message);
             File.AppendAllTextAsync(errorFile, message);
         }
     }
@@ -58,7 +42,7 @@ public class FileProcessor : IDisposable
 
             foreach (var filePath in filePaths)
             {
-                _logger.Enqueue($"Processing {filePath}");
+                logger.Enqueue($"Processing {filePath}");
 
                 ProcessFile(filePath);
 
@@ -70,99 +54,78 @@ public class FileProcessor : IDisposable
                 }
             }
 
-            _logger.Enqueue($"Scan complete. Processed {processedCount} files.");
+            SaveChangesCallback();
+
         }
         catch (Exception ex)
         {
             string errorMessage = $"Error during scanning: {ex.Message}.  Inner exception: {ex.InnerException}\n";
-            _logger.Enqueue(errorMessage);
+            logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
-    public void ProcessFile(Models.FilePath filePath)
+    public void ProcessFile(FilePath filePath)
     {
+        FileInformation info = null;
         try
         {
-            var fileInfo = new FileInfo(filePath);
-            if (!fileInfo.Exists) return;
+            info = FileInformation.CreateFileInformation(filePath);
+            
+            if (!info.Info.Exists) return;
 
-            var (ntfsFileID, volumeSerialNumber) = FileIdentifier.GetNTFSFileID(filePath);
-            FileIdentityKey fileIdentityKey = new(ntfsFileID, volumeSerialNumber);
+            FileIdentityKey fileIdentityKey = info.IdentityKey;
 
             DateTime currentTime = DateTime.UtcNow;
             bool isNewRecord = false;
 
-            FileRecord? fileRecord = TryToFindRecordByFileIdentity(fileIdentityKey, _dataStore);
-
-            string? fileHash = null;
-            if (fileRecord == null)
-            {
-                fileHash = ComputeHashOrImportFromOldDb(filePath, fileIdentityKey);
-
-                fileRecord = GetFileRecordByHashIfExists(fileHash);
-
-                if (FoundFileRecordByHashButDifferentIdentity(fileIdentityKey, fileRecord))
-                {
-                    var newIdentity = new FileIdentity
-                    {
-                        VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
-                        NTFSFileID = fileIdentityKey.NTFSFileID,
-                        FileRecordId = fileRecord!.FileRecordId
-                    };
-                    _context.FileIdentities.Add(newIdentity);
-                    _dataStore.IdentityMap[fileIdentityKey] = newIdentity;
-                }
-
-            }
+            FileRecord? fileRecord = TryToFindRecordByFileIdentity(fileIdentityKey, dataStore);
 
             if (fileRecord == null)
             {
                 isNewRecord = true;
 
-                fileHash ??= FileHasher.ComputeFileHash(filePath);
-
-                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(fileInfo, fileIdentityKey, currentTime, fileHash);
+                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(info.Info, fileIdentityKey, currentTime);
             }
             else
             {
-                UpdateFileRecordIfDifferencesInNameOrContentFound(filePath, fileInfo, currentTime, fileRecord);
+                UpdateFileRecordIfDifferencesInNameOrContentFound(info.Path, info.Info, currentTime, fileRecord);
             }
 
-            UpdateFileLocationIfMoved(filePath, currentTime, fileRecord);
+            UpdateFileLocationIfMoved(info.Path, currentTime, fileRecord);
 
             if (!isNewRecord)
             {
-                _context.FileRecords.Update(fileRecord);
+                context.FileRecords.Update(fileRecord);
             }
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error processing file '{filePath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
-            _logger.Enqueue(errorMessage);
+            string errorMessage = $"Error processing file '{info?.Path}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
-    private void UpdateFileLocationIfMoved(Models.FilePath filePath, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateFileLocationIfMoved(FilePath filePath, DateTime currentTime, FileRecord fileRecord)
     {
         var mostRecentLocationInDB = fileRecord.Locations.Count != 0 ? fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) : null;
         // if mostRecentLocationInDB is null then there are no locations in db
         if (mostRecentLocationInDB is null
-            || !System.IO.Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path.NormalizedPath.AsSpan()))
+            || !System.IO.Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path!.NormalizedPath.AsSpan()))
         {
             var newLocation = new FileLocationsHistory
             {
-                Path = System.IO.Path.GetDirectoryName(filePath) ?? string.Empty,
+                Path = Path.GetDirectoryName(filePath) ?? string.Empty,
                 FileRecordId = fileRecord.FileRecordId,
                 LocationChangeNoticedTime = currentTime
             };
-            _context.FileLocationsHistory.Add(newLocation);
+            context.FileLocationsHistory.Add(newLocation);
             fileRecord.Locations.Add(newLocation);
         }
     }
 
-    private void UpdateFileRecordIfDifferencesInNameOrContentFound(Models.FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateFileRecordIfDifferencesInNameOrContentFound(FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
     {
         fileRecord.LastSeen = currentTime;
         fileRecord.Size = fileInfo.Length;
@@ -173,10 +136,6 @@ public class FileProcessor : IDisposable
             if (fileRecord.Hash != newHash)
             {
                 fileRecord.Hash = newHash;
-                if (!_dataStore.HashToFileRecord.ContainsKey(newHash))
-                {
-                    _dataStore.HashToFileRecord[newHash] = fileRecord;
-                }
             }
             fileRecord.LastWriteTime = fileInfo.LastWriteTimeUtc;
         }
@@ -191,42 +150,29 @@ public class FileProcessor : IDisposable
                 NameChangeNoticedTime = currentTime,
                 FileRecordId = fileRecord.FileRecordId
             };
-            _context.FileNamesHistory.Add(nameHistory);
-            fileRecord.NameHistories.Add(nameHistory);
+            context.FileNamesHistory.Add(nameHistory);
+            fileRecord.NameHistory.Add(nameHistory);
         }
     }
 
-    private FileRecord CreateNewFileRecordWithNameHistoryAndIdentity(FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime, string fileHash)
+    private FileRecord CreateNewFileRecordWithNameHistoryAndIdentity(FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime)
     {
         FileRecord fileRecord = new()
         {
-            Hash = fileHash,
+            Hash = ComputeHashOrImportFromOldDb(fileInfo.FullName, fileIdentityKey),
             CurrentFileName = fileInfo.Name,
             Size = fileInfo.Length,
             LastWriteTime = fileInfo.LastWriteTimeUtc,
             FirstSeen = currentTime,
             LastSeen = currentTime,
-            Locations = [],
-            Identities = [],
-            NameHistories = []
-        };
-
-        FileIdentity newIdentity = new()
-        {
-            VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
             NTFSFileID = fileIdentityKey.NTFSFileID,
-            FileRecord = fileRecord
+            VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
+            Locations = [],
+            NameHistory = []
         };
 
-        fileRecord.Identities.Add(newIdentity);
-        _context.FileRecords.Add(fileRecord);
-        _context.FileIdentities.Add(newIdentity);
-        _dataStore.IdentityMap[fileIdentityKey] = newIdentity;
-
-        if (!_dataStore.HashToFileRecord.ContainsKey(fileHash))
-        {
-            _dataStore.HashToFileRecord[fileHash] = fileRecord;
-        }
+        context.FileRecords.Add(fileRecord);
+        dataStore.IdentityKeyToFileRecord[fileIdentityKey] = fileRecord;
 
         var initialNameHistory = new FileNamesHistory
         {
@@ -234,34 +180,15 @@ public class FileProcessor : IDisposable
             NameChangeNoticedTime = currentTime,
             FileRecordId = fileRecord.FileRecordId
         };
-        _context.FileNamesHistory.Add(initialNameHistory);
-        fileRecord.NameHistories.Add(initialNameHistory);
+        context.FileNamesHistory.Add(initialNameHistory);
+        fileRecord.NameHistory.Add(initialNameHistory);
         return fileRecord;
     }
-
-    private FileRecord? GetFileRecordByHashIfExists(string fileHash)
+    private string ComputeHashOrImportFromOldDb(string filePath, FileIdentityKey fileIdentityKey)
     {
-        if (_dataStore.HashToFileRecord.TryGetValue(fileHash, out var existingRecord))
+        if (oldDBHashImportInfo is not null)
         {
-            return _context.FileRecords
-                .Include(f => f.Locations)
-                .Include(f => f.Identities)
-                .Include(f => f.NameHistories)
-                .FirstOrDefault(f => f.FileRecordId == existingRecord.FileRecordId);
-        }
-        return null;
-    }
-
-    private bool FoundFileRecordByHashButDifferentIdentity(FileIdentityKey fileIdentityKey, FileRecord? fileRecord)
-    {
-        return fileRecord is not null && !_dataStore.IdentityMap.ContainsKey(fileIdentityKey);
-    }
-
-    private string ComputeHashOrImportFromOldDb(Models.FilePath filePath, FileIdentityKey fileIdentityKey)
-    {
-        if (OldDBImportInfo is not null)
-        {
-            return TryToFindRecordByFileIdentity(fileIdentityKey, OldDBImportInfo.dataStore)?.Hash ?? FileHasher.ComputeFileHash(filePath);
+            return TryToFindRecordByFileIdentity(fileIdentityKey, oldDBHashImportInfo.dataStore)?.Hash ?? FileHasher.ComputeFileHash(filePath);
         }
 
         return FileHasher.ComputeFileHash(filePath);
@@ -269,22 +196,22 @@ public class FileProcessor : IDisposable
 
     private static FileRecord? TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, IDataStore dataStore)
     {
-        dataStore.IdentityMap.TryGetValue(fileIdentityKey, out var identity);
-        return identity?.FileRecord;
+        dataStore.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out var fileRecord);
+        return fileRecord;
     }
 
     public void Dispose()
     {
-        _logger.Dispose();
+        logger.Dispose();
 
         lock (_dbSaveLock)
         {
-            if (_context.ChangeTracker.HasChanges())
+            if (context.ChangeTracker.HasChanges())
             {
-                _context.SaveChanges();
+                context.SaveChanges();
             }
         }
-        _context.Dispose();
+        context.Dispose();
     }
 }
 

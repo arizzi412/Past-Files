@@ -63,9 +63,6 @@ namespace Past_Files.Services
                     // Normal during shutdown
                     break;
                 }
-
-                // Tiny delay to avoid busy-wait. Could be shorter or omitted if you prefer.
-                await Task.Delay(10, token);
             }
         }
 

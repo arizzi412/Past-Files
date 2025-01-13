@@ -18,8 +18,9 @@ public class FileRecord
     public DateTime LastWriteTime { get; set; }
     public DateTime FirstSeen { get; set; }
     public DateTime LastSeen { get; set; }
+    public uint VolumeSerialNumber { get; set; }
+    public ulong NTFSFileID { get; set; }
 
     public List<FileLocationsHistory> Locations { get; set; } = [];
-    public List<FileIdentity> Identities { get; set; } = [];
-    public List<FileNamesHistory> NameHistories { get; set; } = [];
+    public List<FileNamesHistory> NameHistory { get; set; } = [];
 }

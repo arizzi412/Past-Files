@@ -14,8 +14,7 @@ namespace Past_Files
     {
         private readonly IConcurrentLoggerService _consoleLogger;
 
-        public ConcurrentDictionary<FileIdentityKey, FileIdentity> IdentityMap { get; private set; }
-        public ConcurrentDictionary<string, FileRecord> HashToFileRecord { get; private set; }
+        public ConcurrentDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; private set; }
 
         public static DataStore CreateDataStore(FileTrackerContext fileTrackerContext, IConcurrentLoggerService consoleLoggerService)
         {
@@ -28,8 +27,7 @@ namespace Past_Files
         private DataStore(IConcurrentLoggerService consoleLoggerService)
         {
             _consoleLogger = consoleLoggerService;
-            IdentityMap = new ConcurrentDictionary<FileIdentityKey, FileIdentity>();
-            HashToFileRecord = new ConcurrentDictionary<string, FileRecord>();
+            IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>();
         }
 
         private void LoadRecords(FileTrackerContext context)
@@ -37,32 +35,27 @@ namespace Past_Files
             _consoleLogger.Enqueue("Loading database into memory");
             try
             {
-                // Load and populate IdentityMap
-                var identities = context.FileIdentities
-                    .Include(i => i.FileRecord)
-                    .AsNoTracking()
-                    .ToList();
 
-                IdentityMap = new ConcurrentDictionary<FileIdentityKey, FileIdentity>(
-                    identities.Select(i => new KeyValuePair<FileIdentityKey, FileIdentity>(
-                        new FileIdentityKey(i.NTFSFileID, i.VolumeSerialNumber),
-                        i
-                    ))
-                );
 
                 // Load and populate HashToFileRecord
                 var fileRecords = context.FileRecords
                     .AsNoTracking()
                     .Include(f => f.Locations)
-                    .Include(f => f.Identities)
-                    .Include(f => f.NameHistories)
+                    .Include(f => f.NameHistory)
                     .Where(f => !string.IsNullOrEmpty(f.Hash))
                     .AsSplitQuery()
                     .ToList();
 
-                HashToFileRecord = new ConcurrentDictionary<string, FileRecord>(
-                    fileRecords.Select(f => new KeyValuePair<string, FileRecord>(f.Hash, f))
-                );
+                var identityKeyToFileRecordKVPs = fileRecords.Select(fileRecord =>
+                    new KeyValuePair<FileIdentityKey, FileRecord>(
+                        new FileIdentityKey(fileRecord.NTFSFileID, fileRecord.VolumeSerialNumber),
+                        fileRecord));
+
+                var distinct = identityKeyToFileRecordKVPs.DistinctBy(x => x.Key.NTFSFileID).ToList();
+
+                var except = identityKeyToFileRecordKVPs.Except(distinct).ToList();
+
+                IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>(identityKeyToFileRecordKVPs);
             }
             catch (Exception ex)
             {

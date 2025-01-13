@@ -6,7 +6,6 @@ namespace Past_Files
 {
     public interface IDataStore
     {
-        ConcurrentDictionary<string, FileRecord> HashToFileRecord { get; }
-        ConcurrentDictionary<FileIdentityKey, FileIdentity> IdentityMap { get; }
+        ConcurrentDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; }
     }
 }

@@ -35,44 +35,62 @@ namespace Past_Files
             using var dbContext = new Data.FileTrackerContext(dbPath);
             dbContext.Database.EnsureCreated();
 
-            DBImportInfo oldDBInfo = null;
+            DBImportInfo dbImportInfo = null;
             if (!string.IsNullOrWhiteSpace(options.OldDatabasePath))
             {
-                oldDBInfo = DBImportInfo.CreateDBImportInfo(options.OldDatabasePath, loggerService);
+                dbImportInfo = DBImportInfo.CreateDBImportInfo(options.OldDatabasePath, loggerService);
             }
 
             var dataStore = DataStore.CreateDataStore(dbContext, loggerService);
 
 
-            var filePaths = GetFilePaths(rootDirectory);
 
-            loggerService.Enqueue($"Total files to process: {filePaths.Count}");
 
-            FileProcessor processor = new FileProcessor(dbContext, dataStore, loggerService, oldDBInfo, saveIntervalInSeconds: 20);
+            FileProcessor processor = new FileProcessor(dbContext, dataStore, loggerService, dbImportInfo, saveIntervalInSeconds: 500);
 
             using var dbContext2 = new Data.FileTrackerContext(dbPath);
-            FileProcessor processor2 = new FileProcessor(dbContext2, dataStore, loggerService, oldDBInfo, saveIntervalInSeconds: 20);
+            FileProcessor processor2 = new FileProcessor(dbContext2, dataStore, loggerService, dbImportInfo, saveIntervalInSeconds: 450);
 
 
             // Start the scanning process
             loggerService.Enqueue("Starting scan...");
 
-            var task1 = Task.Run(() => processor.ScanFiles(filePaths[0]));
-            var task2 = Task.Run(() => processor2.ScanFiles(filePaths[1]));
+            //ScanSingleThreaded(rootDirectory, processor);
 
-            Task.WaitAll(task1, task2);
+            ScanInParallel(rootDirectory, processor, processor2);
+
+
             sw.Stop();
-            Console.WriteLine($"Scan took {sw.ElapsedMilliseconds / 1000}");
+            loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
 
             loggerService.Enqueue("Scan completed. Database Updated.");
 
+            Thread.Sleep(2000);
 
             // Prompt to exit
             Console.WriteLine("\nPress any key to exit...");
             Console.ReadKey();
         }
 
-        private static List<FilePath[]> GetFilePaths(string rootDirectory)
+        private static void ScanSingleThreaded(string rootDirectory, FileProcessor processor)
+        {
+            var filePaths = GetFilePaths(rootDirectory);
+            processor.ScanFiles(filePaths);
+        }
+
+        private static void ScanInParallel(string rootDirectory, FileProcessor processor, FileProcessor processor2)
+        {
+            var filePaths = GetSplitFilePaths(rootDirectory);
+
+            //loggerService.Enqueue($"Total files to process: {filePaths.Count}");
+
+            var task1 = Task.Factory.StartNew(() => processor.ScanFiles(filePaths[0]), TaskCreationOptions.LongRunning);
+            var task2 = Task.Factory.StartNew(() => processor2.ScanFiles(filePaths[1]), TaskCreationOptions.LongRunning);
+
+            Task.WaitAll(task1, task2);
+        }
+
+        private static List<FilePath[]> GetSplitFilePaths(string rootDirectory)
         {
             var files = Directory.EnumerateFiles(rootDirectory, "*", new EnumerationOptions
             {
@@ -80,10 +98,20 @@ namespace Past_Files
                 RecurseSubdirectories = true
             }).ToArray();
 
-            var sizeOfHalf = files.Count() / 2 + 1;
+            var sizeOfHalf = files.Length / 2 + 1;
 
             return files.Select(x => new FilePath(x)).Chunk(sizeOfHalf).ToList();
         }
+
+        private static FilePath[] GetFilePaths(string rootDirectory)
+        {
+            return Directory.EnumerateFiles(rootDirectory, "*", new EnumerationOptions
+            {
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = true
+            }).Select(x => new FilePath(x)).ToArray();
+        }
+
     }
 
     public class Options
