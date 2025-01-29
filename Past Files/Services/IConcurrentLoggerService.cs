@@ -1,8 +1,7 @@
 ﻿namespace Past_Files.Services
 {
-    public interface IConcurrentLoggerService
+    public interface IConcurrentLoggerService : IDisposable
     {
-        void Dispose();
         void Enqueue(string message);
     }
 }

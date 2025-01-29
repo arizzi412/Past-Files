@@ -67,14 +67,14 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
 
     public void ProcessFile(FilePath filePath)
     {
-        FileInformation info = null;
+        FileInformation AllFileInfo = null;
         try
         {
-            info = FileInformation.CreateFileInformation(filePath);
+            AllFileInfo = FileInformation.CreateFileInformation(filePath);
             
-            if (!info.Info.Exists) return;
+            if (!AllFileInfo.Info.Exists) return;
 
-            FileIdentityKey fileIdentityKey = info.IdentityKey;
+            FileIdentityKey fileIdentityKey = AllFileInfo.IdentityKey;
 
             DateTime currentTime = DateTime.UtcNow;
             bool isNewRecord = false;
@@ -85,14 +85,14 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
             {
                 isNewRecord = true;
 
-                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(info.Info, fileIdentityKey, currentTime);
+                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(AllFileInfo.Info, fileIdentityKey, currentTime);
             }
             else
             {
-                UpdateFileRecordIfDifferencesInNameOrContentFound(info.Path, info.Info, currentTime, fileRecord);
+                UpdateFileRecordIfDifferencesInNameOrContentFound(AllFileInfo.Path, AllFileInfo.Info, currentTime, fileRecord);
             }
 
-            UpdateFileLocationIfMoved(info.Path, currentTime, fileRecord);
+            UpdateFileLocationIfMoved(AllFileInfo.Path, currentTime, fileRecord);
 
             if (!isNewRecord)
             {
@@ -101,7 +101,7 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error processing file '{info?.Path}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            string errorMessage = $"Error processing file '{AllFileInfo?.Path}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
             logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
