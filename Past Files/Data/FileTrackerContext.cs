@@ -13,6 +13,9 @@ public class FileTrackerContext(string dbName) : DbContext
     public DbSet<FileLocationsHistory> FileLocationsHistory { get; set; } = null!;
     public DbSet<FileNamesHistory> FileNamesHistory { get; set; } = null!;
 
+    public DbSet<Metadata> Metadata { get; set; }
+
+
     //public static readonly ILoggerFactory MyLoggerFactory
     //    = LoggerFactory.Create(builder =>
     //    {
@@ -68,6 +71,12 @@ public class FileTrackerContext(string dbName) : DbContext
             entity.HasKey(e => e.FileNameHistoryId);
             entity.Property(e => e.FileNameHistoryId)
                   .ValueGeneratedOnAdd();
+        });
+
+        modelBuilder.Entity<Metadata>().HasData(new Metadata
+        {
+            LastScanStartTime = DateTime.UtcNow, // Default value
+            LastScanCompleted = false
         });
     }
 }

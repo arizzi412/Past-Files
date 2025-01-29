@@ -39,11 +39,18 @@ namespace Past_Files
 
             // Start the scanning process
             loggerService.Enqueue("Starting scan...");
+            var metadata = dbContext.Metadata.First();
+            metadata.LastScanStartTime = DateTime.Now;
+            metadata.LastScanCompleted = false;
+            dbContext.SaveChanges();
+
 
             ScanInParallel(rootDirectory, processor, processor2);
 
             sw.Stop();
             loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
+            metadata.LastScanCompleted = true;
+            dbContext.SaveChanges();
             loggerService.Enqueue("Scan completed. Database Updated.");
 
             // Gracefully exit
