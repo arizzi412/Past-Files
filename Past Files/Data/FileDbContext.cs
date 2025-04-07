@@ -7,7 +7,7 @@ using Past_Files.Models;
 
 namespace Past_Files.Data;
 
-public class FileTrackerContext(string dbName) : DbContext
+public class FileDbContext(string dbName) : DbContext
 {
     public DbSet<FileRecord> FileRecords { get; set; } = null!;
     public DbSet<FileLocationsHistory> FileLocationsHistory { get; set; } = null!;
@@ -60,7 +60,7 @@ public class FileTrackerContext(string dbName) : DbContext
             entity.Property(e => e.Path)
                   .HasConversion(
                       path => path.NormalizedPath, // Path object -> string (for DB)
-                      value => new Models.FilePath(value)     // string (from DB) -> Path object
+                      value => new FilePath(value)     // string (from DB) -> Path object
                   )
                   .IsRequired(); // Ensure the path is not null
         });
@@ -75,6 +75,7 @@ public class FileTrackerContext(string dbName) : DbContext
 
         modelBuilder.Entity<Metadata>().HasData(new Metadata
         {
+            Id = 1,
             LastScanStartTime = DateTime.UtcNow, // Default value
             LastScanCompleted = false
         });

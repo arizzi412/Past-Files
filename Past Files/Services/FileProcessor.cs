@@ -1,12 +1,11 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Past_Files.Data;
+﻿using Past_Files.Data;
 using Past_Files.FileUtils;
 using Past_Files.Models;
 using System.Diagnostics;
 
 namespace Past_Files.Services;
 
-public class FileProcessor(FileTrackerContext context, IDataStore dataStore, IConcurrentLoggerService logger, DBImportInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 500) : IDisposable
+public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentLoggerService logger, ImportDbInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 500) : IDisposable
 {
     private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 500;
     private readonly Lock _dbSaveLock = new();
@@ -67,32 +66,31 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
 
     public void ProcessFile(FilePath filePath)
     {
-        FileInformation AllFileInfo = null;
         try
         {
-            AllFileInfo = FileInformation.CreateFileInformation(filePath);
-            
-            if (!AllFileInfo.Info.Exists) return;
+            var fileInfo = new FileInfo(filePath);
+            var fileIdentityKey = FileIdentifier.GetFileIdentityKey(filePath);
 
-            FileIdentityKey fileIdentityKey = AllFileInfo.IdentityKey;
+            if (!fileInfo.Exists) return;
 
             DateTime currentTime = DateTime.UtcNow;
             bool isNewRecord = false;
 
-            FileRecord? fileRecord = TryToFindRecordByFileIdentity(fileIdentityKey, dataStore);
+            FileRecord? fileRecord = TryToFindRecordByFileIdentity(fileIdentityKey, dbCache);
 
+            // file record not found in db
             if (fileRecord == null)
             {
                 isNewRecord = true;
-
-                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(AllFileInfo.Info, fileIdentityKey, currentTime);
+                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(fileInfo, fileIdentityKey, currentTime);
             }
+            // file record found
             else
             {
-                UpdateFileRecordIfDifferencesInNameOrContentFound(AllFileInfo.Path, AllFileInfo.Info, currentTime, fileRecord);
+                UpdateFileRecordIfHasDifferencesInNameOrContent(filePath, fileInfo, currentTime, fileRecord);
             }
 
-            UpdateFileLocationIfMoved(AllFileInfo.Path, currentTime, fileRecord);
+            UpdateFileLocationIfMoved(filePath, currentTime, fileRecord);
 
             if (!isNewRecord)
             {
@@ -101,7 +99,7 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error processing file '{AllFileInfo?.Path}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            string errorMessage = $"Error processing file '{filePath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
             logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
@@ -112,11 +110,11 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
         var mostRecentLocationInDB = fileRecord.Locations.Count != 0 ? fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) : null;
         // if mostRecentLocationInDB is null then there are no locations in db
         if (mostRecentLocationInDB is null
-            || !System.IO.Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path!.NormalizedPath.AsSpan()))
+            || !Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path!.NormalizedPath.AsSpan()))
         {
             var newLocation = new FileLocationsHistory
             {
-                Path = Path.GetDirectoryName(filePath) ?? string.Empty,
+                Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
                 FileRecordId = fileRecord.FileRecordId,
                 LocationChangeNoticedTime = currentTime
             };
@@ -125,7 +123,7 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
         }
     }
 
-    private void UpdateFileRecordIfDifferencesInNameOrContentFound(FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateFileRecordIfHasDifferencesInNameOrContent(FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
     {
         fileRecord.LastSeen = currentTime;
         fileRecord.Size = fileInfo.Length;
@@ -172,7 +170,7 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
         };
 
         context.FileRecords.Add(fileRecord);
-        dataStore.IdentityKeyToFileRecord[fileIdentityKey] = fileRecord;
+        dbCache.IdentityKeyToFileRecord[fileIdentityKey] = fileRecord;
 
         var initialNameHistory = new FileNamesHistory
         {
@@ -194,9 +192,9 @@ public class FileProcessor(FileTrackerContext context, IDataStore dataStore, ICo
         return FileHasher.ComputeFileHash(filePath);
     }
 
-    private static FileRecord? TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, IDataStore dataStore)
+    private static FileRecord? TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, IDbCache dbCache)
     {
-        dataStore.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out var fileRecord);
+        dbCache.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out var fileRecord);
         return fileRecord;
     }
 

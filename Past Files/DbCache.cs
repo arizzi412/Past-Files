@@ -10,26 +10,26 @@ using System.Linq;
 
 namespace Past_Files
 {
-    public class DataStore : IDataStore
+    public class DbCache : IDbCache
     {
         private readonly IConcurrentLoggerService _consoleLogger;
 
         public ConcurrentDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; private set; }
 
-        public static DataStore CreateDataStore(FileTrackerContext fileTrackerContext, IConcurrentLoggerService consoleLoggerService)
+        public static DbCache CreateCache(FileDbContext fileTrackerContext, IConcurrentLoggerService consoleLoggerService)
         {
-            var ds = new DataStore(consoleLoggerService);
-            ds.LoadRecords(fileTrackerContext);
+            var ds = new DbCache(consoleLoggerService);
+            ds.LoadDbRecords(fileTrackerContext);
             return ds;
         }
 
-        private DataStore(IConcurrentLoggerService consoleLoggerService)
+        private DbCache(IConcurrentLoggerService consoleLoggerService)
         {
             _consoleLogger = consoleLoggerService;
             IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>();
         }
 
-        private void LoadRecords(FileTrackerContext context)
+        private void LoadDbRecords(FileDbContext context)
         {
             _consoleLogger.Enqueue("Loading database into memory");
             try

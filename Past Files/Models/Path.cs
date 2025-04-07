@@ -4,23 +4,11 @@ using System.IO;
 
 namespace Past_Files.Models;
 
-public class FilePath
+public class FilePath(string path)
 {
-    private string _normalizedPath; // Backing field for the property
-    public string NormalizedPath
-    {
-        get => _normalizedPath;
-        private set => _normalizedPath = NormalizePath(value);
-    }
+    public string NormalizedPath { get; } = NormalizePath(path);
 
-    private FilePath() { } // Required for EF Core materialization
-
-    public FilePath(string path)
-    {
-        NormalizedPath = path;
-    }
-
-    private static string NormalizePath(string path) => path.Replace(System.IO.Path.DirectorySeparatorChar, '/');
+    private static string NormalizePath(string path) => path.Replace(Path.DirectorySeparatorChar, '/');
 
     public override string ToString() => NormalizedPath;
 

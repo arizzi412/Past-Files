@@ -4,7 +4,7 @@ using System.Collections.Concurrent;
 
 namespace Past_Files
 {
-    public interface IDataStore
+    public interface IDbCache
     {
         ConcurrentDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; }
     }
