@@ -37,8 +37,8 @@ public static class Program
 
         // Initialize file processors
         FileProcessor processor = new(dbContext, dbCache, loggerService, importDbInfo, saveIntervalInSeconds: 500);
-        using var dbContext2 = InitializeDatabase(dbPath);
-        FileProcessor processor2 = new(dbContext2, dbCache, loggerService, importDbInfo, saveIntervalInSeconds: 450);
+        //using var dbContext2 = InitializeDatabase(dbPath);
+        //FileProcessor processor2 = new(dbContext2, dbCache, loggerService, importDbInfo, saveIntervalInSeconds: 450);
 
         loggerService.Enqueue("Starting scan...");
 
@@ -47,8 +47,7 @@ public static class Program
         dbMetadata.LastScanCompleted = false;
         dbContext.SaveChanges();
 
-
-        ScanInParallel(rootDirectory, processor, processor2);
+        ScanSingleThreaded(rootDirectory, processor);
 
         sw.Stop();
 
