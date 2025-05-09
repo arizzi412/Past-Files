@@ -37,15 +37,12 @@ public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentL
         try
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
-            int processedCount = 0;
-
             foreach (var filePath in filePaths)
             {
                 logger.Enqueue($"Processing {filePath}");
 
                 ProcessFile(filePath);
 
-                processedCount++;
                 if (stopwatch.ElapsedMilliseconds > _saveIntervalInSeconds * 1000)
                 {
                     SaveChangesCallback();
@@ -74,28 +71,19 @@ public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentL
             if (!fileInfo.Exists) return;
 
             DateTime currentTime = DateTime.UtcNow;
-            bool isNewRecord = false;
 
-            FileRecord? fileRecord = TryToFindRecordByFileIdentity(fileIdentityKey, dbCache);
+            bool RecordExistsInDB = TryToFindRecordByFileIdentity(fileIdentityKey, dbCache, out var fileRecord);
 
-            // file record not found in db
-            if (fileRecord == null)
+            if (RecordExistsInDB)
             {
-                isNewRecord = true;
-                fileRecord = CreateNewFileRecordWithNameHistoryAndIdentity(fileInfo, fileIdentityKey, currentTime);
+                UpdateExistingRecord(filePath, fileInfo, currentTime, fileRecord!);
             }
-            // file record found
             else
             {
-                UpdateFileRecordIfHasDifferencesInNameOrContent(filePath, fileInfo, currentTime, fileRecord);
+                fileRecord = CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, currentTime);
             }
 
-            UpdateFileLocationIfMoved(filePath, currentTime, fileRecord);
-
-            if (!isNewRecord)
-            {
-                context.FileRecords.Update(fileRecord);
-            }
+            // note no database changes will be written until context.SaveChanges() is called.
         }
         catch (Exception ex)
         {
@@ -105,31 +93,15 @@ public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentL
         }
     }
 
-    private void UpdateFileLocationIfMoved(FilePath filePath, DateTime currentTime, FileRecord fileRecord)
-    {
-        var mostRecentLocationInDB = fileRecord.Locations.Count != 0 ? fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) : null;
-        // if mostRecentLocationInDB is null then there are no locations in db
-        if (mostRecentLocationInDB is null
-            || !Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path!.NormalizedPath.AsSpan()))
-        {
-            var newLocation = new FileLocationsHistory
-            {
-                Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
-                FileRecordId = fileRecord.FileRecordId,
-                LocationChangeNoticedTime = currentTime
-            };
-            context.FileLocationsHistory.Add(newLocation);
-            fileRecord.Locations.Add(newLocation);
-        }
-    }
 
-    private void UpdateFileRecordIfHasDifferencesInNameOrContent(FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateExistingRecord(FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
     {
-        fileRecord.LastSeen = currentTime;
-        fileRecord.Size = fileInfo.Length;
+        fileRecord!.LastSeen = currentTime;
 
-        if (fileRecord.LastWriteTime != fileInfo.LastWriteTimeUtc || fileRecord.Size != fileInfo.Length)
+        if (fileRecord.LastWriteTime != fileInfo.LastWriteTimeUtc)
         {
+            fileRecord.Size = fileInfo.Length;
+
             string newHash = FileHasher.ComputeFileHash(filePath);
             if (fileRecord.Hash != newHash)
             {
@@ -138,22 +110,49 @@ public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentL
             fileRecord.LastWriteTime = fileInfo.LastWriteTimeUtc;
         }
 
-        if (!fileRecord.CurrentFileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase))
+        var nameDifferent = !fileRecord.CurrentFileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase);
+        if (nameDifferent)
         {
-            fileRecord.CurrentFileName = fileInfo.Name;
-
-            var nameHistory = new FileNamesHistory
-            {
-                FileName = fileInfo.Name,
-                NameChangeNoticedTime = currentTime,
-                FileRecordId = fileRecord.FileRecordId
-            };
-            context.FileNamesHistory.Add(nameHistory);
-            fileRecord.NameHistory.Add(nameHistory);
+            UpdateName(fileInfo, currentTime, fileRecord);
         }
+
+        var mostRecentLocationInDB = fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime);
+        var locationDifferent = !Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path!.NormalizedPath.AsSpan());
+
+        if (locationDifferent)
+        {
+            UpdateLocation(filePath, currentTime, fileRecord);
+        }
+        context.FileRecords.Update(fileRecord);
     }
 
-    private FileRecord CreateNewFileRecordWithNameHistoryAndIdentity(FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime)
+    private void UpdateLocation(FilePath filePath, DateTime currentTime, FileRecord fileRecord)
+    {
+        var newLocation = new FileLocationsHistory
+        {
+            Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
+            FileRecordId = fileRecord.FileRecordId,
+            LocationChangeNoticedTime = currentTime
+        };
+        context.FileLocationsHistory.Add(newLocation);
+        fileRecord.Locations.Add(newLocation);
+    }
+
+    private void UpdateName(FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    {
+        fileRecord.CurrentFileName = fileInfo.Name;
+
+        var nameHistory = new FileNamesHistory
+        {
+            FileName = fileInfo.Name,
+            NameChangeNoticedTime = currentTime,
+            FileRecordId = fileRecord.FileRecordId
+        };
+        context.FileNamesHistory.Add(nameHistory);
+        fileRecord.NameHistory.Add(nameHistory);
+    }
+
+    private FileRecord CreateNewFileRecordAndAddToDB(FilePath filePath, FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime)
     {
         FileRecord fileRecord = new()
         {
@@ -180,22 +179,34 @@ public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentL
         };
         context.FileNamesHistory.Add(initialNameHistory);
         fileRecord.NameHistory.Add(initialNameHistory);
+
+
+        var newLocation = new FileLocationsHistory
+        {
+            Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
+            FileRecordId = fileRecord.FileRecordId,
+            LocationChangeNoticedTime = currentTime
+        };
+        context.FileLocationsHistory.Add(newLocation);
+        fileRecord.Locations.Add(newLocation);
+
         return fileRecord;
     }
     private string ComputeHashOrImportFromOldDb(string filePath, FileIdentityKey fileIdentityKey)
     {
         if (oldDBHashImportInfo is not null)
         {
-            return TryToFindRecordByFileIdentity(fileIdentityKey, oldDBHashImportInfo.dataStore)?.Hash ?? FileHasher.ComputeFileHash(filePath);
+            if (TryToFindRecordByFileIdentity(fileIdentityKey, oldDBHashImportInfo.dataStore, out var fileRecord))
+            {
+                return fileRecord?.Hash ?? FileHasher.ComputeFileHash(filePath);
+            }
         }
-
         return FileHasher.ComputeFileHash(filePath);
     }
 
-    private static FileRecord? TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, IDbCache dbCache)
+    private static bool TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, IDbCache dbCache, out FileRecord? fileRecord)
     {
-        dbCache.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out var fileRecord);
-        return fileRecord;
+        return dbCache.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out fileRecord);
     }
 
     public void Dispose()
