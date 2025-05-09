@@ -131,7 +131,7 @@ public static class Program
         }).ToArray();
 
         var sizeOfHalf = files.Length / 2 + 1;
-        return files.Select(x => new FilePath(x)).Chunk(sizeOfHalf).ToList();
+        return [.. files.Select(x => new FilePath(x)).Chunk(sizeOfHalf)];
     }
 
     private static void PromptExit()
