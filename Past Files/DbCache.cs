@@ -1,7 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// Past Files/DbCache.cs
+using Microsoft.EntityFrameworkCore;
 using Past_Files.Data;
 using Past_Files.Models;
-using Past_Files.Services;
+using Past_Files.Services; // For FileIdentityKey
 using Serilog;
 using System;
 using System.Collections.Concurrent;
@@ -14,7 +15,8 @@ namespace Past_Files
     {
         private readonly IConcurrentLoggerService _consoleLogger;
 
-        public ConcurrentDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; private set; }
+        public ConcurrentDictionary<FileIdentityKey, FileInstance> IdentityKeyToFileInstanceCache { get; private set; }
+        public ConcurrentDictionary<string, FileContent> HashToFileContentCache { get; private set; }
 
         public static DbCache CreateCache(FileDbContext fileTrackerContext, IConcurrentLoggerService consoleLoggerService)
         {
@@ -26,38 +28,57 @@ namespace Past_Files
         private DbCache(IConcurrentLoggerService consoleLoggerService)
         {
             _consoleLogger = consoleLoggerService;
-            IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>();
+            IdentityKeyToFileInstanceCache = new ConcurrentDictionary<FileIdentityKey, FileInstance>();
+            HashToFileContentCache = new ConcurrentDictionary<string, FileContent>();
         }
 
         private void LoadDbRecords(FileDbContext context)
         {
-            _consoleLogger.Enqueue("Loading database into memory");
+            _consoleLogger.Enqueue("Loading database into memory...");
             try
             {
-                var fileRecords = context.FileRecords
+                _consoleLogger.Enqueue("Loading FileContents...");
+                var fileContents = context.FileContents
                     .AsNoTracking()
-                    .Include(f => f.Locations)
-                    .Include(f => f.NameHistory)
-                    .Where(f => !string.IsNullOrEmpty(f.Hash))
+                    .ToList();
+                HashToFileContentCache = new ConcurrentDictionary<string, FileContent>(
+                    fileContents.ToDictionary(fc => fc.Hash, fc => fc)
+                );
+                _consoleLogger.Enqueue($"Loaded {HashToFileContentCache.Count} FileContents into cache.");
+
+                _consoleLogger.Enqueue("Loading FileInstances...");
+                var fileInstances = context.FileInstances
+                    .AsNoTracking()
+                    .Include(fi => fi.FileContent) // Eager load FileContent
+                    .Include(fi => fi.LocationHistory)
+                    .Include(fi => fi.NameHistory)
                     .AsSplitQuery()
                     .ToList();
 
-                var identityKeyToFileRecordKVPs = fileRecords.Select(fileRecord =>
-                    new KeyValuePair<FileIdentityKey, FileRecord>(
-                        new FileIdentityKey(fileRecord.NTFSFileID, fileRecord.VolumeSerialNumber),
-                        fileRecord));
-
-                var distinct = identityKeyToFileRecordKVPs.DistinctBy(x => x.Key.NTFSFileID).ToList();
-
-                var except = identityKeyToFileRecordKVPs.Except(distinct).ToList();
-
-                IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>(identityKeyToFileRecordKVPs);
+                IdentityKeyToFileInstanceCache = new ConcurrentDictionary<FileIdentityKey, FileInstance>(
+                    fileInstances.Select(fi => new KeyValuePair<FileIdentityKey, FileInstance>(
+                        new FileIdentityKey(fi.NTFSFileID, fi.VolumeSerialNumber),
+                        fi
+                    ))
+                );
+                _consoleLogger.Enqueue($"Loaded {IdentityKeyToFileInstanceCache.Count} FileInstances into cache.");
             }
             catch (Exception ex)
             {
-                _consoleLogger.Enqueue($"Error loading records into memory: {ex.Message}");
+                _consoleLogger.Enqueue($"Error loading records into memory: {ex.Message} {ex.InnerException}");
                 Log.Error(ex, "Error loading records into memory");
             }
+            _consoleLogger.Enqueue("Finished loading database into memory.");
+        }
+
+        public void AddOrUpdateInstance(FileIdentityKey key, FileInstance instance)
+        {
+            IdentityKeyToFileInstanceCache[key] = instance;
+        }
+
+        public void AddOrUpdateContent(string hash, FileContent content)
+        {
+            HashToFileContentCache[hash] = content;
         }
     }
 }

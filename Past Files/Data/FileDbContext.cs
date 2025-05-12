@@ -1,27 +1,24 @@
-﻿// Data/FileTrackerContext.cs
+﻿// Data/FileDbContext.cs
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Serilog;
-using Serilog.Extensions.Logging;
-using Past_Files.Models;
+using Past_Files.Models; // Ensure this using is correct for your new models
 
 namespace Past_Files.Data;
 
 public class FileDbContext(string dbName) : DbContext
 {
-    public DbSet<FileRecord> FileRecords { get; set; } = null!;
-    public DbSet<FileLocationsHistory> FileLocationsHistory { get; set; } = null!;
-    public DbSet<FileNamesHistory> FileNamesHistory { get; set; } = null!;
+    // Remove old DbSet
+    // public DbSet<FileRecord> FileRecords { get; set; } = null!;
 
-    public DbSet<Metadata> Metadata { get; set; }
+    // Add new DbSets
+    public DbSet<FileContent> FileContents { get; set; } = null!;
+    public DbSet<FileInstance> FileInstances { get; set; } = null!;
 
+    // Rename history DbSets
+    public DbSet<FileLocationHistoryEntry> FileLocationHistoryEntries { get; set; } = null!;
+    public DbSet<FileNameHistoryEntry> FileNameHistoryEntries { get; set; } = null!;
 
-    //public static readonly ILoggerFactory MyLoggerFactory
-    //    = LoggerFactory.Create(builder =>
-    //    {
-    //        builder.AddSerilog(Log.Logger); // Pass the global Serilog logger
-    //        builder.AddConsole(); // Requires Microsoft.Extensions.Logging.Console
-    //    });
+    public DbSet<Metadata> Metadata { get; set; } = null!;
+
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
         => options
@@ -29,54 +26,65 @@ public class FileDbContext(string dbName) : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // FileRecord configuration
-        modelBuilder.Entity<FileRecord>(entity =>
+        // FileContent configuration
+        modelBuilder.Entity<FileContent>(entity =>
         {
-            entity.HasKey(e => e.FileRecordId);
-            entity.Property(e => e.FileRecordId)
-                  .ValueGeneratedOnAdd();
+            entity.HasKey(e => e.FileContentId);
+            entity.Property(e => e.FileContentId).ValueGeneratedOnAdd();
+            entity.HasIndex(e => e.Hash).IsUnique(); // Hash must be unique for content
+            // Relationship: One FileContent can have many FileInstances
+            entity.HasMany(fc => fc.FileInstances)
+                  .WithOne(fi => fi.FileContent)
+                  .HasForeignKey(fi => fi.FileContentId)
+                  .OnDelete(DeleteBehavior.Cascade); // Or Restrict, depending on desired behavior
+        });
 
-            entity.HasIndex(e => e.Hash);
+        // FileInstance configuration
+        modelBuilder.Entity<FileInstance>(entity =>
+        {
+            entity.HasKey(e => e.FileInstanceId);
+            entity.Property(e => e.FileInstanceId).ValueGeneratedOnAdd();
 
-            entity.HasMany(e => e.Locations)
-                  .WithOne(l => l.FileRecord)
-                  .HasForeignKey(l => l.FileRecordId)
+            // Unique constraint for a file instance on a specific volume
+            entity.HasIndex(e => new { e.VolumeSerialNumber, e.NTFSFileID }).IsUnique();
+
+            entity.Property(e => e.FilePath).IsRequired();
+            entity.Property(e => e.CurrentFileName).IsRequired();
+
+            // Relationship: One FileInstance has many FileLocationHistoryEntries
+            entity.HasMany(fi => fi.LocationHistory)
+                  .WithOne(lh => lh.FileInstance)
+                  .HasForeignKey(lh => lh.FileInstanceId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasMany(e => e.NameHistory)
-                  .WithOne(n => n.FileRecord)
-                  .HasForeignKey(n => n.FileRecordId)
+            // Relationship: One FileInstance has many FileNameHistoryEntries
+            entity.HasMany(fi => fi.NameHistory)
+                  .WithOne(nh => nh.FileInstance)
+                  .HasForeignKey(nh => nh.FileInstanceId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // FileLocationsHistory configuration
-        modelBuilder.Entity<FileLocationsHistory>(entity =>
+        // FileLocationHistoryEntry configuration (was FileLocationsHistory)
+        modelBuilder.Entity<FileLocationHistoryEntry>(entity =>
         {
-            entity.HasKey(e => e.FileLocationId);
-            entity.Property(e => e.FileLocationId)
-                  .ValueGeneratedOnAdd();
-
-            // Configure Path as a value object stored as a string
-            entity.Property(e => e.Path)
-                  .HasConversion(
-                      path => path.NormalizedPath, // Path object -> string (for DB)
-                      value => new FilePath(value)     // string (from DB) -> Path object
-                  )
-                  .IsRequired(); // Ensure the path is not null
+            entity.HasKey(e => e.FileLocationHistoryEntryId);
+            entity.Property(e => e.FileLocationHistoryEntryId).ValueGeneratedOnAdd();
+            entity.Property(e => e.DirectoryPath).IsRequired();
+            // Removed old Path value object conversion, DirectoryPath is now a string.
+            // If you still use the FilePath class for normalization, apply it before setting the string.
         });
 
-        // FileNamesHistory configuration
-        modelBuilder.Entity<FileNamesHistory>(entity =>
+        // FileNameHistoryEntry configuration (was FileNamesHistory)
+        modelBuilder.Entity<FileNameHistoryEntry>(entity =>
         {
-            entity.HasKey(e => e.FileNameHistoryId);
-            entity.Property(e => e.FileNameHistoryId)
-                  .ValueGeneratedOnAdd();
+            entity.HasKey(e => e.FileNameHistoryEntryId);
+            entity.Property(e => e.FileNameHistoryEntryId).ValueGeneratedOnAdd();
         });
 
         modelBuilder.Entity<Metadata>().HasData(new Metadata
         {
             Id = 1,
-            LastScanStartTime = DateTime.UtcNow, // Default value
+            LastScanStartTime = DateTime.UtcNow,
             LastScanCompleted = false
         });
     }

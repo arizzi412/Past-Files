@@ -1,155 +1,136 @@
-﻿using CommandLine;
+﻿// Past Files/Program.cs
+using CommandLine;
 using Past_Files.Data;
-using Past_Files.Models;
+using Past_Files.Models; // General models
 using Past_Files.Services;
 using System.Diagnostics;
+using Microsoft.EntityFrameworkCore; // For migration
+using Past_Files.Migration; // Namespace for your migrator
 
 namespace Past_Files;
 
 public static class Program
 {
+    public class Options
+    {
+        [Option('r', "root_directory", Required = false, HelpText = "Specifies the root directory for scanning.")]
+        public string? RootDirectory { get; set; }
+
+        [Option('d', "database_path", Required = false, HelpText = "Specifies the main database path (new schema).")]
+        public string? DatabasePath { get; set; }
+
+        [Option('m', Required = false, HelpText = "Path to the OLD database to migrate to the new schema.")]
+        public string? OldDatabasePathForMigration { get; set; }
+
+        [Option('n', Required = false, HelpText = "Path for the NEW database that will be created by migration.")]
+        public string? NewDatabasePathForMigration { get; set; }
+    }
+
     public static void Main(string[] args)
     {
         Stopwatch sw = Stopwatch.StartNew();
-
         using var loggerService = new ConsoleLoggerService();
 
-        var commandLineArguments = ParseArguments(args, loggerService);
-        if (commandLineArguments == null) return;
+        var parsedArgs = Parser.Default.ParseArguments<Options>(args);
+
+        parsedArgs.WithParsed(options =>
+        {
+            if (!string.IsNullOrEmpty(options.OldDatabasePathForMigration) &&
+                !string.IsNullOrEmpty(options.NewDatabasePathForMigration))
+            {
+                loggerService.Enqueue("Starting database migration...");
+                if (!File.Exists(options.OldDatabasePathForMigration))
+                {
+                    loggerService.Enqueue($"ERROR: Old database for migration not found: {options.OldDatabasePathForMigration}");
+                    PromptExit();
+                    return;
+                }
+                DatabaseMigrator.Migrate(options.OldDatabasePathForMigration, options.NewDatabasePathForMigration, loggerService);
+                loggerService.Enqueue("Database migration completed.");
+                PromptExit();
+            }
+            else if (!string.IsNullOrEmpty(options.RootDirectory))
+            {
+                RunScan(options, loggerService, sw);
+            }
+            else
+            {
+                loggerService.Enqueue("No operation specified. Use --root_directory to scan or --migrate_old_db to migrate.");
+                parsedArgs.WithNotParsed(HandleParseError); // Show help
+                PromptExit();
+            }
+        })
+            .WithNotParsed(HandleParseError);
+    }
+
+    private static void HandleParseError(IEnumerable<Error> errs)
+    {
+        // Logger might not be initialized here if parsing fails early.
+        Console.WriteLine("Error parsing arguments or missing required arguments.");
+        foreach (var error in errs)
+        {
+            if (error is not HelpRequestedError && error is not VersionRequestedError)
+                Console.WriteLine(error.ToString());
+        }
+        PromptExit(true);
+    }
 
 
+    private static void RunScan(Options commandLineArguments, ConsoleLoggerService loggerService, Stopwatch sw)
+    {
         var rootDirectory = commandLineArguments.RootDirectory ?? Environment.CurrentDirectory;
 
-        if (commandLineArguments.OldDatabasePath is not null
-            && !IsImportDatabasePathValid(commandLineArguments.OldDatabasePath, loggerService))
-        {
-            return;
-        }
-
-        var dbPath = commandLineArguments.DatabasePath ?? "filetracker.db";
+        var dbPath = commandLineArguments.DatabasePath ?? "filetracker_new.db";
+        loggerService.Enqueue($"Using database: {dbPath}");
+        // IMPORTANT: Ensure this DB is either new or already migrated to the NEW schema.
+        // EF Core's EnsureCreated will create it based on the NEW schema defined in FileDbContext.
         using var dbContext = InitializeDatabase(dbPath);
-
-        ImportDbInfo? importDbInfo = commandLineArguments.OldDatabasePath != null
-            ? ImportDbInfo.CreateDBImportInfo(commandLineArguments.OldDatabasePath, loggerService)
-            : null;
 
         var dbCache = DbCache.CreateCache(dbContext, loggerService);
 
-        // Initialize file processors
-        FileProcessor processor = new(dbContext, dbCache, loggerService, importDbInfo, saveIntervalInSeconds: 500);
-        //using var dbContext2 = InitializeDatabase(dbPath);
-        //FileProcessor processor2 = new(dbContext2, dbCache, loggerService, importDbInfo, saveIntervalInSeconds: 450);
+        FileProcessor processor = new(dbContext, dbCache, loggerService, saveIntervalInSeconds: 300);
 
         loggerService.Enqueue("Starting scan...");
+        var dbMetadata = dbContext.Metadata.FirstOrDefault();
 
-        var dbMetadata = dbContext.Metadata.First();
-        dbMetadata.LastScanStartTime = DateTime.Now;
+        dbMetadata!.LastScanStartTime = DateTime.UtcNow;
         dbMetadata.LastScanCompleted = false;
         dbContext.SaveChanges();
 
-        ScanSingleThreaded(rootDirectory, processor);
+        ScanSingleThreaded(rootDirectory, processor, loggerService);
 
         sw.Stop();
+        loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000.0:F2} seconds");
 
-        loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
         dbMetadata.LastScanCompleted = true;
         dbContext.SaveChanges();
-
         loggerService.Enqueue("Scan completed. Database Updated.");
-
-        // Gracefully exit
         PromptExit();
-    }
-
-    private static Options? ParseArguments(string[] args, ConsoleLoggerService loggerService)
-    {
-        return Parser.Default.ParseArguments<Options>(args)
-            .WithNotParsed(errors =>
-            {
-                foreach (var error in errors)
-                {
-                    loggerService.Enqueue($"Error parsing arguments: {error}");
-                }
-                loggerService.Enqueue("Malformed arguments. Exiting.");
-                PromptExit();
-            }).Value;
-    }
-
-    private static bool IsImportDatabasePathValid(string? oldDatabasePath, ConsoleLoggerService loggerService)
-    {
-        if (string.IsNullOrEmpty(oldDatabasePath))
-        {
-            loggerService.Enqueue("Empty old database path. Exiting.");
-            PromptExit();
-            return false;
-        }
-
-        if (!File.Exists(oldDatabasePath))
-        {
-            loggerService.Enqueue($"Old database doesn't exist: {oldDatabasePath}. Exiting.");
-            PromptExit();
-            return false;
-        }
-
-        return true;
     }
 
     private static FileDbContext InitializeDatabase(string dbPath)
     {
         var dbContext = new FileDbContext(dbPath);
-        dbContext.Database.EnsureCreated();
+        dbContext.Database.EnsureCreated(); // Creates DB based on current (new) model definitions
         return dbContext;
     }
 
-    private static void ScanInParallel(string rootDirectory, FileProcessor processor, FileProcessor processor2)
+    private static void ScanSingleThreaded(string rootDirectory, FileProcessor processor, IConcurrentLoggerService loggerService)
     {
-        var filePaths = GetSplitFilePaths(rootDirectory);
-
-        var task1 = Task.Factory.StartNew(() => processor.ScanFiles(filePaths[0]), TaskCreationOptions.LongRunning);
-        var task2 = Task.Factory.StartNew(() => processor2.ScanFiles(filePaths[1]), TaskCreationOptions.LongRunning);
-
-        Task.WaitAll(task1, task2);
-    }
-
-    private static void ScanSingleThreaded(string rootDirectory, FileProcessor processor)
-    {
+        loggerService.Enqueue($"Scanning directory: {rootDirectory}");
         var filePaths = Directory.EnumerateFiles(rootDirectory, "*", new EnumerationOptions
         {
             IgnoreInaccessible = true,
             RecurseSubdirectories = true
-        }).Select(x => new FilePath(x)).ToArray();
+        }).Select(x => new FilePath(x)).ToArray(); // Use your FilePath model
 
         processor.ScanFiles(filePaths);
     }
 
-    private static List<FilePath[]> GetSplitFilePaths(string rootDirectory)
-    {
-        var files = Directory.EnumerateFiles(rootDirectory, "*", new EnumerationOptions
-        {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = true
-        }).ToArray();
-
-        var sizeOfHalf = files.Length / 2 + 1;
-        return [.. files.Select(x => new FilePath(x)).Chunk(sizeOfHalf)];
-    }
-
-    private static void PromptExit()
+    private static void PromptExit(bool error = false)
     {
         Console.WriteLine("\nPress any key to exit...");
         Console.ReadKey();
-        Environment.Exit(0);
+        Environment.Exit(error ? 1 : 0);
     }
-}
-
-public class Options
-{
-    [Option('r', "root_directory", Required = false, HelpText = "Specifies the root directory.")]
-    public string? RootDirectory { get; set; }
-
-    [Option('d', "database_path", Required = false, HelpText = "Specifies the database path.")]
-    public string? DatabasePath { get; set; }
-
-    [Option('i', "import", Required = false, HelpText = "Specifies the old database path for import.")]
-    public string? OldDatabasePath { get; set; }
 }

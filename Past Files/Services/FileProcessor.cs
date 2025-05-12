@@ -1,11 +1,16 @@
-﻿using Past_Files.Data;
+﻿// Past Files/Services/FileProcessor.cs
+using Past_Files.Data;
 using Past_Files.FileUtils;
 using Past_Files.Models;
+using System;
 using System.Diagnostics;
+using System.IO; // Required for Path methods
+using System.Linq; // Required for LINQ methods like MaxBy
+using Microsoft.EntityFrameworkCore; // Required for EF Core operations
 
 namespace Past_Files.Services;
 
-public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentLoggerService logger, ImportDbInfo? oldDBHashImportInfo = null, int saveIntervalInSeconds = 500) : IDisposable
+public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentLoggerService logger, int saveIntervalInSeconds = 500) : IDisposable
 {
     private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 500;
     private readonly Lock _dbSaveLock = new();
@@ -20,208 +25,252 @@ public class FileProcessor(FileDbContext context, IDbCache dbCache, IConcurrentL
                 if (context.ChangeTracker.HasChanges())
                 {
                     context.SaveChanges();
-                    logger.Enqueue($"[TIMER] Auto-saved changes at {DateTime.UtcNow:u}");
+                   // dbCache.LoadDbRecords(context); // Reload cache after saving
+                    logger.Enqueue($"[TIMER] Auto-saved changes and reloaded cache at {DateTime.UtcNow:u}");
                 }
             }
         }
         catch (Exception ex)
         {
-            string message = $"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException}\n";
+            string message = $"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException?.Message}\n";
             logger.Enqueue(message);
             File.AppendAllTextAsync(errorFile, message);
         }
     }
 
-    public void ScanFiles(FilePath[] filePaths)
+    public void ScanFiles(FilePath[] filePaths) // Models.FilePath is your custom class
     {
         try
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
-            foreach (var filePath in filePaths)
+            foreach (var filePathModel in filePaths)
             {
-                logger.Enqueue($"Processing {filePath}");
-
-                ProcessFile(filePath);
-
+                logger.Enqueue($"Processing {filePathModel.NormalizedPath}");
+                ProcessFile(filePathModel);
                 if (stopwatch.ElapsedMilliseconds > _saveIntervalInSeconds * 1000)
                 {
                     SaveChangesCallback();
                     stopwatch.Restart();
                 }
             }
-
             SaveChangesCallback();
-
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error during scanning: {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            string errorMessage = $"Error during scanning: {ex.Message}. Inner exception: {ex.InnerException?.Message}\n";
             logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
-    public void ProcessFile(FilePath filePath)
+    public void ProcessFile(FilePath filePathModel) // filePathModel is your custom FilePath
     {
+        string currentFilePath = filePathModel.NormalizedPath;
         try
         {
-            var fileInfo = new FileInfo(filePath);
-            var fileIdentityKey = FileIdentifier.GetFileIdentityKey(filePath);
+            var fileInfo = new FileInfo(currentFilePath);
+            if (!fileInfo.Exists)
+            {
+                logger.Enqueue($"File not found: {currentFilePath}. Skipping.");
+                return;
+            }
 
-            if (!fileInfo.Exists) return;
-
+            var fileIdentityKey = FileIdentifier.GetFileIdentityKey(currentFilePath);
             DateTime currentTime = DateTime.UtcNow;
 
-            bool RecordExistsInDB = TryToFindRecordByFileIdentity(fileIdentityKey, dbCache, out var fileRecord);
+            // Try to find existing instance in cache
+            dbCache.IdentityKeyToFileInstanceCache.TryGetValue(fileIdentityKey, out var existingInstance);
 
-            if (RecordExistsInDB)
+            if (existingInstance != null)
             {
-                UpdateExistingRecord(filePath, fileInfo, currentTime, fileRecord!);
+                UpdateExistingFileInstance(existingInstance, fileInfo, currentFilePath, currentTime);
             }
             else
             {
-                fileRecord = CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, currentTime);
+                CreateNewFileInstance(fileInfo, fileIdentityKey, currentFilePath, currentTime);
             }
-
-            // note no database changes will be written until context.SaveChanges() is called.
+        }
+        catch (IOException ioEx) when (ioEx.Message.Contains("being used by another process"))
+        {
+            logger.Enqueue($"Skipping locked file '{currentFilePath}': {ioEx.Message}");
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error processing file '{filePath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
+            string errorMessage = $"Error processing file '{currentFilePath}': {ex.Message}. Inner exception: {ex.InnerException?.Message}\n";
             logger.Enqueue(errorMessage);
             File.AppendAllTextAsync(errorFile, errorMessage);
         }
     }
 
-
-    private void UpdateExistingRecord(FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    private FileContent GetOrCreateFileContent(string hash, long size, DateTime currentTime)
     {
-        fileRecord!.LastSeen = currentTime;
-
-        if (fileRecord.LastWriteTime != fileInfo.LastWriteTimeUtc)
+        if (dbCache.HashToFileContentCache.TryGetValue(hash, out var existingContent) && existingContent != null)
         {
-            fileRecord.Size = fileInfo.Length;
-
-            string newHash = FileHasher.ComputeFileHash(filePath);
-            if (fileRecord.Hash != newHash)
+            if (existingContent.GlobalLastSeen < currentTime) // Update if current scan is later
             {
-                fileRecord.Hash = newHash;
+                existingContent.GlobalLastSeen = currentTime;
+                context.FileContents.Update(existingContent);
+                // dbCache.AddOrUpdateContent(hash, existingContent); // Cache will be reloaded on save
             }
-            fileRecord.LastWriteTime = fileInfo.LastWriteTimeUtc;
+            // If Size differs for the same hash, it's an anomaly or hash collision.
+            if (existingContent.Size != size)
+            {
+                logger.Enqueue($"[WARNING] Hash collision or size mismatch for hash {hash}. DB size: {existingContent.Size}, File size: {size}. Keeping existing DB record.");
+                // Decide on a strategy: update size, log error, etc. For now, we keep existing.
+            }
+            return existingContent;
         }
-
-        var nameDifferent = !fileRecord.CurrentFileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase);
-        if (nameDifferent)
+        else
         {
-            UpdateName(fileInfo, currentTime, fileRecord);
+            var newContent = new FileContent
+            {
+                Hash = hash,
+                Size = size,
+                GlobalFirstSeen = currentTime,
+                GlobalLastSeen = currentTime
+            };
+            context.FileContents.Add(newContent);
+            // dbCache.AddOrUpdateContent(hash, newContent); // Cache will be reloaded on save
+            return newContent;
         }
-
-        var mostRecentLocationInDB = fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime);
-        var locationDifferent = !Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path!.NormalizedPath.AsSpan());
-
-        if (locationDifferent)
-        {
-            UpdateLocation(filePath, currentTime, fileRecord);
-        }
-        context.FileRecords.Update(fileRecord);
     }
 
-    private void UpdateLocation(FilePath filePath, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateExistingFileInstance(FileInstance instance, FileInfo fileInfo, string currentNormalizedFilePath, DateTime currentTime)
     {
-        var newLocation = new FileLocationsHistory
+        instance.InstanceLastSeen = currentTime;
+
+        // Check for path/name changes
+        string newFileName = fileInfo.Name;
+        string newDirectoryPath = Path.GetDirectoryName(currentNormalizedFilePath) ?? string.Empty;
+        newDirectoryPath = new FilePath(newDirectoryPath).NormalizedPath; // Normalize
+        bool changed = false;
+
+        if (instance.FilePath != currentNormalizedFilePath)
         {
-            Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
-            FileRecordId = fileRecord.FileRecordId,
-            LocationChangeNoticedTime = currentTime
-        };
-        context.FileLocationsHistory.Add(newLocation);
-        fileRecord.Locations.Add(newLocation);
+            // Path has changed (file moved or renamed with path)
+            instance.FilePath = currentNormalizedFilePath;
+            changed = true;
+
+            // Update CurrentFileName if it also changed as part of the path change
+            if (instance.CurrentFileName != newFileName)
+            {
+                instance.CurrentFileName = newFileName;
+                AddFileNameHistory(instance, newFileName, currentTime); // Log new name
+            }
+
+            var latestLocation = instance.LocationHistory.MaxBy(lh => lh.ChangeNoticedTime);
+            if (latestLocation == null || latestLocation.DirectoryPath != newDirectoryPath)
+            {
+                AddLocationHistory(instance, newDirectoryPath, currentTime);
+            }
+        }
+
+        // Check for content changes (LastWriteTime or Hash)
+        if (instance.InstanceLastWriteTime != fileInfo.LastWriteTimeUtc)
+        {
+            changed = true;
+            instance.InstanceLastWriteTime = fileInfo.LastWriteTimeUtc;
+            // Size is on FileContent, hash identifies content
+            string newHash = FileHasher.ComputeFileHash(currentNormalizedFilePath);
+
+            if (instance.FileContent == null || instance.FileContent.Hash != newHash)
+            {
+                logger.Enqueue($"Hash changed for {currentNormalizedFilePath}. Old: {instance.FileContent?.Hash}, New: {newHash}");
+                var newFileContent = GetOrCreateFileContent(newHash, fileInfo.Length, currentTime);
+                instance.FileContentId = newFileContent.FileContentId;
+                instance.FileContent = newFileContent; // Associate with new or existing content
+            }
+            else if (instance.FileContent.Size != fileInfo.Length)
+            {
+                // Hash is the same, but size changed. This is unusual.
+                // Update size on FileContent.
+                logger.Enqueue($"[INFO] Size changed for {currentNormalizedFilePath} but hash {instance.FileContent.Hash} is the same. Updating size from {instance.FileContent.Size} to {fileInfo.Length}.");
+                instance.FileContent.Size = fileInfo.Length;
+                context.FileContents.Update(instance.FileContent);
+            }
+        }
+
+        if (changed)
+        {
+            context.FileInstances.Update(instance);
+            dbCache.AddOrUpdateInstance(new FileIdentityKey(instance.NTFSFileID, instance.VolumeSerialNumber), instance); // Cache will be reloaded
+        }
     }
 
-    private void UpdateName(FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    private FileInstance CreateNewFileInstance(FileInfo fileInfo, FileIdentityKey fileIdentityKey, string currentNormalizedFilePath, DateTime currentTime)
     {
-        fileRecord.CurrentFileName = fileInfo.Name;
+        string hash = FileHasher.ComputeFileHash(currentNormalizedFilePath);
+        var fileContent = GetOrCreateFileContent(hash, fileInfo.Length, currentTime);
 
-        var nameHistory = new FileNamesHistory
+        var newInstance = new FileInstance
         {
-            FileName = fileInfo.Name,
-            NameChangeNoticedTime = currentTime,
-            FileRecordId = fileRecord.FileRecordId
-        };
-        context.FileNamesHistory.Add(nameHistory);
-        fileRecord.NameHistory.Add(nameHistory);
-    }
-
-    private FileRecord CreateNewFileRecordAndAddToDB(FilePath filePath, FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime)
-    {
-        FileRecord fileRecord = new()
-        {
-            Hash = ComputeHashOrImportFromOldDb(fileInfo.FullName, fileIdentityKey),
-            CurrentFileName = fileInfo.Name,
-            Size = fileInfo.Length,
-            LastWriteTime = fileInfo.LastWriteTimeUtc,
-            FirstSeen = currentTime,
-            LastSeen = currentTime,
-            NTFSFileID = fileIdentityKey.NTFSFileID,
+            FileContentId = fileContent.FileContentId,
+            FileContent = fileContent,
             VolumeSerialNumber = fileIdentityKey.VolumeSerialNumber,
-            Locations = [],
-            NameHistory = []
+            NTFSFileID = fileIdentityKey.NTFSFileId,
+            FilePath = currentNormalizedFilePath,
+            CurrentFileName = fileInfo.Name,
+            InstanceLastWriteTime = fileInfo.LastWriteTimeUtc,
+            InstanceFirstSeen = currentTime,
+            InstanceLastSeen = currentTime
         };
 
-        context.FileRecords.Add(fileRecord);
-        dbCache.IdentityKeyToFileRecord[fileIdentityKey] = fileRecord;
+        context.FileInstances.Add(newInstance);
+        // Need to save to get newInstance.FileInstanceId for history entries
+        // This is suboptimal during a batch. Consider deferring history or a different strategy.
+        // For now, let's assume IDs are available after Add and before SaveChanges if using in-memory PK generation or similar.
+        // A better approach: Add history items and EF Core will fix up FKs on SaveChanges.
 
-        var initialNameHistory = new FileNamesHistory
-        {
-            FileName = fileInfo.Name,
-            NameChangeNoticedTime = currentTime,
-            FileRecordId = fileRecord.FileRecordId
-        };
-        context.FileNamesHistory.Add(initialNameHistory);
-        fileRecord.NameHistory.Add(initialNameHistory);
+        // Add initial history entries
+        AddFileNameHistory(newInstance, newInstance.CurrentFileName, currentTime);
+        string directoryPath = Path.GetDirectoryName(currentNormalizedFilePath) ?? string.Empty;
+        directoryPath = new FilePath(directoryPath).NormalizedPath; // Normalize
+        AddLocationHistory(newInstance, directoryPath, currentTime);
 
+        // dbCache.AddOrUpdateInstance(fileIdentityKey, newInstance); // Cache will be reloaded on save
 
-        var newLocation = new FileLocationsHistory
-        {
-            Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
-            FileRecordId = fileRecord.FileRecordId,
-            LocationChangeNoticedTime = currentTime
-        };
-        context.FileLocationsHistory.Add(newLocation);
-        fileRecord.Locations.Add(newLocation);
-
-        return fileRecord;
+        logger.Enqueue($"New file instance created for: {currentNormalizedFilePath} with hash {hash}");
+        return newInstance;
     }
-    private string ComputeHashOrImportFromOldDb(string filePath, FileIdentityKey fileIdentityKey)
+
+    private void AddFileNameHistory(FileInstance instance, string fileName, DateTime noticedTime)
     {
-        if (oldDBHashImportInfo is not null)
+        var nameHistory = new FileNameHistoryEntry
         {
-            if (TryToFindRecordByFileIdentity(fileIdentityKey, oldDBHashImportInfo.dataStore, out var fileRecord))
-            {
-                return fileRecord?.Hash ?? FileHasher.ComputeFileHash(filePath);
-            }
+            FileInstance = instance, // Link to instance
+            // FileInstanceId will be set by EF if instance is tracked or upon saving
+            FileName = fileName,
+            ChangeNoticedTime = noticedTime
+        };
+        context.FileNameHistoryEntries.Add(nameHistory);
+        if (instance.FileInstanceId > 0)
+        { // If instance is already saved and has an ID
+            instance.NameHistory ??= [];
+            instance.NameHistory.Add(nameHistory);
         }
-        return FileHasher.ComputeFileHash(filePath);
     }
 
-    private static bool TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, IDbCache dbCache, out FileRecord? fileRecord)
+    private void AddLocationHistory(FileInstance instance, string directoryPath, DateTime noticedTime)
     {
-        return dbCache.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out fileRecord);
+        var locationHistory = new FileLocationHistoryEntry
+        {
+            FileInstance = instance, // Link to instance
+            DirectoryPath = directoryPath,
+            ChangeNoticedTime = noticedTime
+        };
+        context.FileLocationHistoryEntries.Add(locationHistory);
+        if (instance.FileInstanceId > 0)
+        { // If instance is already saved and has an ID
+            instance.LocationHistory ??= [];
+            instance.LocationHistory.Add(locationHistory);
+        }
     }
 
     public void Dispose()
     {
+        SaveChangesCallback(); // Final save
         logger.Dispose();
-
-        lock (_dbSaveLock)
-        {
-            if (context.ChangeTracker.HasChanges())
-            {
-                context.SaveChanges();
-            }
-        }
         context.Dispose();
     }
 }
 
-public record struct FileIdentityKey(ulong NTFSFileID, uint VolumeSerialNumber);
