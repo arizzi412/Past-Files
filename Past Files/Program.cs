@@ -14,46 +14,23 @@ public static class Program
 
         using var loggerService = new ConsoleLoggerService();
 
-        var commandLineArguments = ParseArguments(args, loggerService);
-        if (commandLineArguments == null) return;
+        var rootDirectory = Environment.CurrentDirectory;
 
+        var repository = new EntityRepository(loggerService);
 
-        var rootDirectory = commandLineArguments.RootDirectory ?? Environment.CurrentDirectory;
-
-        if (commandLineArguments.OldDatabasePath is not null
-            && !IsImportDatabasePathValid(commandLineArguments.OldDatabasePath, loggerService))
-        {
-            return;
-        }
-
-        var dbPath = commandLineArguments.DatabasePath ?? "filetracker.db";
-        using var dbContext = InitializeDatabase(dbPath);
-
-        ImportDbInfo? importDbInfo = commandLineArguments.OldDatabasePath != null
-            ? ImportDbInfo.CreateDBImportInfo(commandLineArguments.OldDatabasePath, loggerService)
-            : null;
-
-        var dbCache = DbCache.CreateCache(dbContext, loggerService);
-
-        // Initialize file processors
-        FileProcessor processor = new(dbContext, dbCache, loggerService, importDbInfo, saveIntervalInSeconds: 500);
-        //using var dbContext2 = InitializeDatabase(dbPath);
-        //FileProcessor processor2 = new(dbContext2, dbCache, loggerService, importDbInfo, saveIntervalInSeconds: 450);
+        FileProcessor processor = new(repository, loggerService, saveIntervalInSeconds: 500);
 
         loggerService.Enqueue("Starting scan...");
 
-        var dbMetadata = dbContext.Metadata.First();
-        dbMetadata.LastScanStartTime = DateTime.Now;
-        dbMetadata.LastScanCompleted = false;
-        dbContext.SaveChanges();
+        repository.ScanStartUpdateMetadata();
 
         ScanSingleThreaded(rootDirectory, processor);
 
         sw.Stop();
 
         loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
-        dbMetadata.LastScanCompleted = true;
-        dbContext.SaveChanges();
+
+        repository.ScanEndUpdateMetadata();
 
         loggerService.Enqueue("Scan completed. Database Updated.");
 
@@ -61,45 +38,6 @@ public static class Program
         PromptExit();
     }
 
-    private static Options? ParseArguments(string[] args, ConsoleLoggerService loggerService)
-    {
-        return Parser.Default.ParseArguments<Options>(args)
-            .WithNotParsed(errors =>
-            {
-                foreach (var error in errors)
-                {
-                    loggerService.Enqueue($"Error parsing arguments: {error}");
-                }
-                loggerService.Enqueue("Malformed arguments. Exiting.");
-                PromptExit();
-            }).Value;
-    }
-
-    private static bool IsImportDatabasePathValid(string? oldDatabasePath, ConsoleLoggerService loggerService)
-    {
-        if (string.IsNullOrEmpty(oldDatabasePath))
-        {
-            loggerService.Enqueue("Empty old database path. Exiting.");
-            PromptExit();
-            return false;
-        }
-
-        if (!File.Exists(oldDatabasePath))
-        {
-            loggerService.Enqueue($"Old database doesn't exist: {oldDatabasePath}. Exiting.");
-            PromptExit();
-            return false;
-        }
-
-        return true;
-    }
-
-    private static FileDbContext InitializeDatabase(string dbPath)
-    {
-        var dbContext = new FileDbContext(dbPath);
-        dbContext.Database.EnsureCreated();
-        return dbContext;
-    }
 
     private static void ScanInParallel(string rootDirectory, FileProcessor processor, FileProcessor processor2)
     {
@@ -140,16 +78,4 @@ public static class Program
         Console.ReadKey();
         Environment.Exit(0);
     }
-}
-
-public class Options
-{
-    [Option('r', "root_directory", Required = false, HelpText = "Specifies the root directory.")]
-    public string? RootDirectory { get; set; }
-
-    [Option('d', "database_path", Required = false, HelpText = "Specifies the database path.")]
-    public string? DatabasePath { get; set; }
-
-    [Option('i', "import", Required = false, HelpText = "Specifies the old database path for import.")]
-    public string? OldDatabasePath { get; set; }
 }

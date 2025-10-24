@@ -15,14 +15,6 @@ public class FileDbContext(string dbName) : DbContext
 
     public DbSet<Metadata> Metadata { get; set; }
 
-
-    //public static readonly ILoggerFactory MyLoggerFactory
-    //    = LoggerFactory.Create(builder =>
-    //    {
-    //        builder.AddSerilog(Log.Logger); // Pass the global Serilog logger
-    //        builder.AddConsole(); // Requires Microsoft.Extensions.Logging.Console
-    //    });
-
     protected override void OnConfiguring(DbContextOptionsBuilder options)
         => options
             .UseSqlite($"Data Source={dbName}");
