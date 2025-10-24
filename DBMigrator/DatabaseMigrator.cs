@@ -103,23 +103,23 @@ namespace Past_Files.Migration
     // ... rest of the DatabaseMigrator class remains the same
     public static class DatabaseMigrator
     {
-        public static void Migrate(string oldDbPath, string newDbPath, IConcurrentLoggerService logger)
+        public static void Migrate(string oldDbPath, string newDbPath)
         {
-            logger.Enqueue($"Starting migration from '{oldDbPath}' to '{newDbPath}'.");
+            Console.WriteLine($"Starting migration from '{oldDbPath}' to '{newDbPath}'.");
 
             if (File.Exists(newDbPath))
             {
-                logger.Enqueue($"Warning: New database '{newDbPath}' already exists. It will be overwritten.");
+                Console.WriteLine($"Warning: New database '{newDbPath}' already exists. It will be overwritten.");
                 File.Delete(newDbPath);
             }
 
             using var oldDbContext = new OldDbMigrationContext(oldDbPath);
             using var newDbContext = new FileDbContext(newDbPath); // Uses current (new) schema
 
-            logger.Enqueue("Ensuring new database schema is created...");
+            Console.WriteLine("Ensuring new database schema is created...");
             newDbContext.Database.EnsureCreated(); // Create new DB with new schema
 
-            logger.Enqueue("Reading records from old database...");
+            Console.WriteLine("Reading records from old database...");
             List<OldFileRecord> oldFileRecords;
             try
             {
@@ -132,20 +132,20 @@ namespace Past_Files.Migration
             }
             catch (Exception ex)
             {
-                logger.Enqueue($"ERROR reading from old database: {ex.Message} - {ex.InnerException?.Message}. Migration aborted.");
+                Console.WriteLine($"ERROR reading from old database: {ex.Message} - {ex.InnerException?.Message}. Migration aborted.");
                 if (ex.ToString().Contains("no such table: FileRecords") || ex.ToString().Contains("no such table"))
                 {
-                    logger.Enqueue("The old database might not contain the expected tables or is not a valid SQLite DB with the defined old schema.");
+                    Console.WriteLine("The old database might not contain the expected tables or is not a valid SQLite DB with the defined old schema.");
                 }
                 return;
             }
 
 
-            logger.Enqueue($"Found {oldFileRecords.Count} records in old database.");
+            Console.WriteLine($"Found {oldFileRecords.Count} records in old database.");
 
             var contentMap = new Dictionary<string, FileContent>(); // Hash -> FileContent
 
-            logger.Enqueue("Migrating FileContents...");
+            Console.WriteLine("Migrating FileContents...");
             int contentCounter = 0;
             // Group by Hash and Size to create unique FileContent entries.
             // If hash collisions with different sizes are possible (shouldn't be with good hashes),
@@ -154,7 +154,7 @@ namespace Past_Files.Migration
             {
                 if (string.IsNullOrEmpty(group.Key))
                 {
-                    logger.Enqueue($"Skipping records with empty hash (found {group.Count()} such records). First one example: ID {group.First().FileRecordId}");
+                    Console.WriteLine($"Skipping records with empty hash (found {group.Count()} such records). First one example: ID {group.First().FileRecordId}");
                     continue;
                 }
 
@@ -169,7 +169,7 @@ namespace Past_Files.Migration
                 long sizeForHash = firstOfGroup.Size;
                 if (group.Any(fr => fr.Size != sizeForHash))
                 {
-                    logger.Enqueue($"[WARNING] Inconsistent sizes found for hash '{group.Key}'. Using size {sizeForHash}. Other sizes: {string.Join(", ", group.Select(fr => fr.Size).Distinct())}");
+                    Console.WriteLine($"[WARNING] Inconsistent sizes found for hash '{group.Key}'. Using size {sizeForHash}. Other sizes: {string.Join(", ", group.Select(fr => fr.Size).Distinct())}");
                 }
 
 
@@ -191,11 +191,11 @@ namespace Past_Files.Migration
                         try
                         {
                             newDbContext.SaveChanges();
-                            logger.Enqueue($"Migrated {contentCounter} FileContents...");
+                            Console.WriteLine($"Migrated {contentCounter} FileContents...");
                         }
                         catch (DbUpdateException duex)
                         {
-                            logger.Enqueue($"Error saving FileContents batch: {duex.Message} - Inner: {duex.InnerException?.Message}");
+                            Console.WriteLine($"Error saving FileContents batch: {duex.Message} - Inner: {duex.InnerException?.Message}");
                             // Potentially a unique constraint violation on Hash if logic is flawed.
                             // For now, rethrow or log and skip.
                             throw;
@@ -209,19 +209,19 @@ namespace Past_Files.Migration
             }
             catch (DbUpdateException duex)
             {
-                logger.Enqueue($"Error saving final FileContents: {duex.Message} - Inner: {duex.InnerException?.Message}");
+                Console.WriteLine($"Error saving final FileContents: {duex.Message} - Inner: {duex.InnerException?.Message}");
                 throw;
             }
-            logger.Enqueue($"Completed migrating {contentCounter} FileContents (unique hashes).");
+            Console.WriteLine($"Completed migrating {contentCounter} FileContents (unique hashes).");
 
 
-            logger.Enqueue("Migrating FileInstances and their histories...");
+            Console.WriteLine("Migrating FileInstances and their histories...");
             int instanceCounter = 0;
             foreach (var oldRec in oldFileRecords)
             {
                 if (string.IsNullOrEmpty(oldRec.Hash) || !contentMap.TryGetValue(oldRec.Hash, out var parentContent))
                 {
-                    logger.Enqueue($"Skipping FileRecord ID {oldRec.FileRecordId} (File: '{oldRec.CurrentFileName}') due to missing hash or no parent content found.");
+                    Console.WriteLine($"Skipping FileRecord ID {oldRec.FileRecordId} (File: '{oldRec.CurrentFileName}') due to missing hash or no parent content found.");
                     continue;
                 }
 
@@ -268,7 +268,7 @@ namespace Past_Files.Migration
                     }
                     else
                     {
-                        logger.Enqueue($"Skipping empty/null location history for OldFileRecordId: {oldRec.FileRecordId}, OldFileLocationId: {oldLocHist.FileLocationId}");
+                        Console.WriteLine($"Skipping empty/null location history for OldFileRecordId: {oldRec.FileRecordId}, OldFileLocationId: {oldLocHist.FileLocationId}");
                     }
                 }
                 instanceCounter++;
@@ -277,11 +277,11 @@ namespace Past_Files.Migration
                     try
                     {
                         newDbContext.SaveChanges();
-                        logger.Enqueue($"Migrated {instanceCounter} FileInstances...");
+                        Console.WriteLine($"Migrated {instanceCounter} FileInstances...");
                     }
                     catch (DbUpdateException duex)
                     {
-                        logger.Enqueue($"Error saving FileInstances batch (around instance for old ID {oldRec.FileRecordId}): {duex.Message} - Inner: {duex.InnerException?.Message}");
+                        Console.WriteLine($"Error saving FileInstances batch (around instance for old ID {oldRec.FileRecordId}): {duex.Message} - Inner: {duex.InnerException?.Message}");
                         // Potential issue: UQ_FileInstance_Location (VolumeSerialNumber, NTFSFileID)
                         // This would happen if the old DB had duplicates for (VolumeSerialNumber, NTFSFileID) which is unlikely for FileRecordId PK.
                         // More likely an issue with FKs if not set up correctly, or other constraints.
@@ -295,12 +295,12 @@ namespace Past_Files.Migration
             }
             catch (DbUpdateException duex)
             {
-                logger.Enqueue($"Error saving final FileInstances: {duex.Message} - Inner: {duex.InnerException?.Message}");
+                Console.WriteLine($"Error saving final FileInstances: {duex.Message} - Inner: {duex.InnerException?.Message}");
                 throw;
             }
-            logger.Enqueue($"Completed migrating {instanceCounter} FileInstances.");
+            Console.WriteLine($"Completed migrating {instanceCounter} FileInstances.");
 
-            logger.Enqueue("Migration finished successfully.");
+            Console.WriteLine("Migration finished successfully.");
         }
 
         private static string DetermineFullFilePath(OldFileRecord oldRec)

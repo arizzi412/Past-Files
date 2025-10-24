@@ -1,9 +1,10 @@
 ﻿// Utils/FileIdentifier.cs
-using System;
-using System.IO;
-using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using Past_Files.Services;
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
 
 namespace Past_Files.FileUtils;
 
@@ -28,6 +29,18 @@ public static partial class FileIdentifier
         public uint FileIndexLow;
     }
 
+
+    // P/Invoke for opening a file handle efficiently using LibraryImport
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial SafeFileHandle CreateFile(
+        string lpFileName,
+        FileAccess dwDesiredAccess,
+        FileShare dwShareMode,
+        IntPtr lpSecurityAttributes,
+        FileMode dwCreationDisposition,
+        FileAttributes dwFlagsAndAttributes,
+        IntPtr hTemplateFile);
+
     /// <summary>
     /// Retrieves the NTFS File ID and Volume Serial Number for a given file.
     /// </summary>
@@ -35,16 +48,21 @@ public static partial class FileIdentifier
     /// <returns>A tuple containing the FileID and VolumeSerialNumber.</returns>
     public static FileIdentityKey GetFileIdentityKey(string filePath)
     {
-        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        var handle = fileStream.SafeFileHandle;
-        if (GetFileInformationByHandle(handle, out BY_HANDLE_FILE_INFORMATION fileInfo))
+        using (SafeFileHandle handle = CreateFile(filePath, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero, FileMode.Open, FileAttributes.Normal, IntPtr.Zero))
         {
-            ulong fileID = (ulong)fileInfo.FileIndexHigh << 32 | fileInfo.FileIndexLow;
-            return new(fileID, fileInfo.VolumeSerialNumber);
+            if (handle.IsInvalid)
+            {
+                throw new IOException("Unable to get file handle.", new Win32Exception(Marshal.GetLastWin32Error()));
+            }
+
+            if (GetFileInformationByHandle(handle, out BY_HANDLE_FILE_INFORMATION fileInfo))
+            {
+                ulong fileID = ((ulong)fileInfo.FileIndexHigh << 32) | fileInfo.FileIndexLow;
+                return new(fileID, fileInfo.VolumeSerialNumber);
+            }
+            else
+            {
+                throw new IOException("Unable to get file information.", new Win32Exception(Marshal.GetLastWin32Error()));
+            }
         }
-        else
-        {
-            throw new IOException("Unable to get file information.", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-        }
-    }
 }
