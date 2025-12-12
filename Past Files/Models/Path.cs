@@ -32,4 +32,23 @@ public class FilePath(string path)
     {
         return v.NormalizedPath;
     }
+
+    public static bool IsValidDirectoryAndExists(string path)
+    {
+        // 1. Basic null or empty check
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        // 2. Check for invalid characters in the path
+        if (path.Any(c => Path.GetInvalidPathChars().Contains(c)))
+        {
+            return false;
+        }
+
+        // 3. Check if the directory actually exists
+        // Directory.Exists handles some other errors (like unmapped drives) by returning false
+        return Directory.Exists(path);
+    }
 }
