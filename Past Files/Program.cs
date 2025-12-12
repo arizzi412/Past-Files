@@ -12,28 +12,29 @@ public static class Program
     {
         Stopwatch sw = Stopwatch.StartNew();
 
-        using var loggerService = new ConsoleLoggerService();
 
         var rootDirectory = (args.Length == 0 || string.IsNullOrEmpty(args[0]) || !FilePath.IsValidDirectoryAndExists(args[0])) ?  Environment.CurrentDirectory : args[0];
-        loggerService.Enqueue($"Backing up {rootDirectory}");
 
-        var repository = new EntityRepository(loggerService);
+        using (var loggerService = new ConsoleLoggerService())
+        using (var repository = new EntityRepository(loggerService))
+        {
+            loggerService.Enqueue($"Backing up {rootDirectory}");
+            FileProcessor processor = new(repository, loggerService, saveIntervalInSeconds: 500);
 
-        FileProcessor processor = new(repository, loggerService, saveIntervalInSeconds: 500);
+            loggerService.Enqueue("Starting scan...");
 
-        loggerService.Enqueue("Starting scan...");
+            repository.ScanStartUpdateMetadata();
 
-        repository.ScanStartUpdateMetadata();
+            ScanSingleThreaded(rootDirectory, processor);
 
-        ScanSingleThreaded(rootDirectory, processor);
+            sw.Stop();
 
-        sw.Stop();
+            loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
 
-        loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
+            repository.ScanEndUpdateMetadata();
 
-        repository.ScanEndUpdateMetadata();
-
-        loggerService.Enqueue("Scan completed. Database Updated.");
+            loggerService.Enqueue("Scan completed. Database Updated.");
+        }
 
         // Gracefully exit
         PromptExit();
