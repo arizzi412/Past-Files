@@ -15,7 +15,7 @@ public static class Program
 
         using var loggerService = new ConsoleLoggerService();
 
-        var rootDirectory = (string.IsNullOrEmpty(args?[0]) || FilePath.IsValidDirectoryAndExists(args?[0])) ? args[0] : Environment.CurrentDirectory;
+        var rootDirectory = (args.Length == 0 || string.IsNullOrEmpty(args[0]) || !FilePath.IsValidDirectoryAndExists(args?[0])) ?  Environment.CurrentDirectory : args[0];
         loggerService.Enqueue($"Backing up {rootDirectory}");
 
         var repository = new EntityRepository(loggerService);
