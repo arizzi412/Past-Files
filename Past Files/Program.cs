@@ -1,6 +1,4 @@
-﻿using CommandLine;
-using Microsoft.EntityFrameworkCore;
-using Past_Files.Data;
+﻿using Past_Files.Data;
 using Past_Files.Models;
 using Past_Files.Services;
 using System.Diagnostics;
@@ -16,7 +14,7 @@ public static class Program
 
         using var loggerService = new ConsoleLoggerService();
 
-        var rootDirectory = (args.Length == 0 || string.IsNullOrEmpty(args[0]) || !FilePath.IsValidDirectoryAndExists(args?[0])) ?  Environment.CurrentDirectory : args[0];
+        var rootDirectory = (args.Length == 0 || string.IsNullOrEmpty(args[0]) || !FilePath.IsValidDirectoryAndExists(args[0])) ?  Environment.CurrentDirectory : args[0];
         loggerService.Enqueue($"Backing up {rootDirectory}");
 
         var repository = new EntityRepository(loggerService);

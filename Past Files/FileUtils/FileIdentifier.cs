@@ -63,7 +63,7 @@ public static partial class FileIdentifier
         // They need to become \\?\UNC\Server\Share
         if (fullPath.StartsWith(@"\\"))
         {
-            return @"\\?\UNC\" + fullPath.Substring(2);
+            return string.Concat(@"\\?\UNC\", fullPath.AsSpan(2));
         }
 
         // 4. Handle standard Drive paths (e.g., C:\Folder)
