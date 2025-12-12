@@ -33,22 +33,37 @@ public class FilePath(string path)
         return v.NormalizedPath;
     }
 
+    /// <summary>
+    /// Returns the directory path relative to the drive/volume root.
+    /// E.g., "C:/Users/Name/File.txt" -> "Users/Name"
+    /// E.g., "E:/Games/Game.exe" -> "Games"
+    /// </summary>
+    public string GetDirectoryRelativeToRoot()
+    {
+        // Get the parent directory of the file
+        string? directory = Path.GetDirectoryName(NormalizedPath);
+        if (string.IsNullOrEmpty(directory)) return string.Empty;
+
+        // Get the root (e.g., "C:\")
+        string? root = Path.GetPathRoot(directory);
+
+        // If no root is found, it's already relative or invalid
+        if (string.IsNullOrEmpty(root)) return NormalizePath(directory);
+
+        // Get relative path (e.g., "Users\Name")
+        string relative = Path.GetRelativePath(root, directory);
+
+        // Handle case where file is at root (returns ".")
+        if (relative == ".") return string.Empty;
+
+        // Ensure we store it with forward slashes for consistency
+        return relative.Replace(Path.DirectorySeparatorChar, '/');
+    }
+
     public static bool IsValidDirectoryAndExists(string path)
     {
-        // 1. Basic null or empty check
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
-
-        // 2. Check for invalid characters in the path
-        if (path.Any(c => Path.GetInvalidPathChars().Contains(c)))
-        {
-            return false;
-        }
-
-        // 3. Check if the directory actually exists
-        // Directory.Exists handles some other errors (like unmapped drives) by returning false
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (path.Any(c => Path.GetInvalidPathChars().Contains(c))) return false;
         return Directory.Exists(path);
     }
 }

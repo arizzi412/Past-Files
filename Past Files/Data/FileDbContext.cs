@@ -1,8 +1,5 @@
 ﻿// Data/FileTrackerContext.cs
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Serilog;
-using Serilog.Extensions.Logging;
 using Past_Files.Models;
 
 namespace Past_Files.Data;

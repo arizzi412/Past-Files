@@ -2,11 +2,7 @@
 using Past_Files.Data;
 using Past_Files.Models;
 using Past_Files.Services;
-using Serilog;
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace Past_Files
 {
@@ -56,7 +52,6 @@ namespace Past_Files
             catch (Exception ex)
             {
                 _consoleLogger.Enqueue($"Error loading records into memory: {ex.Message}");
-                Log.Error(ex, "Error loading records into memory");
             }
         }
     }

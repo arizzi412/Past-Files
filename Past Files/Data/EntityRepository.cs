@@ -75,7 +75,7 @@ public class EntityRepository: IDisposable
 
         var newLocation = new FileLocationsHistory
         {
-            Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
+            Path = filePath.GetDirectoryRelativeToRoot(), // Changed from Path.GetDirectoryName
             FileRecordId = fileRecord.FileRecordId,
             LocationChangeNoticedTime = currentTime
         };
@@ -103,7 +103,7 @@ public class EntityRepository: IDisposable
     {
         var newLocation = new FileLocationsHistory
         {
-            Path = Path.GetDirectoryName(filePath.NormalizedPath) ?? string.Empty,
+            Path = filePath.GetDirectoryRelativeToRoot(), // Changed from Path.GetDirectoryName
             FileRecordId = fileRecord.FileRecordId,
             LocationChangeNoticedTime = currentTime
         };

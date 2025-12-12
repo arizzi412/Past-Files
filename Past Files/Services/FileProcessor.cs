@@ -7,7 +7,7 @@ namespace Past_Files.Services;
 
 public class FileProcessor(EntityRepository repository, IConcurrentLoggerService logger, int saveIntervalInSeconds = 500) : IDisposable
 {
-    private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 500;
+    private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 15;
     private readonly Lock _dbSaveLock = new();
     private readonly string errorFile = Environment.CurrentDirectory + @"\Scan errors.txt";
 
@@ -38,7 +38,6 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
                 logger.Enqueue($"Processing {filePath}");
 
                 ProcessFile(filePath);
-
                 if (stopwatch.ElapsedMilliseconds > _saveIntervalInSeconds * 1000)
                 {
                     SaveChangesCallback();
@@ -113,7 +112,13 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
         }
 
         var mostRecentLocationInDB = fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime);
-        var locationDifferent = !Path.GetDirectoryName(filePath.NormalizedPath.AsSpan()).SequenceEqual(mostRecentLocationInDB.Path!.NormalizedPath.AsSpan());
+
+        // The DB now contains (or will contain) relative paths"
+        string incomingRelativePath = filePath.GetDirectoryRelativeToRoot();
+        string dbPath = mostRecentLocationInDB.Path!.NormalizedPath;
+
+        // Simple string comparison
+        var locationDifferent = !incomingRelativePath.Equals(dbPath, StringComparison.OrdinalIgnoreCase);
 
         if (locationDifferent)
         {
