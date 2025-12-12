@@ -9,6 +9,7 @@ namespace Past_Files;
 
 public static class Program
 {
+    static readonly List<string> namesToskip = ["filetracker.db", "filetracker.db-shm", "filetracker.db-wal"];
     public static void Main(string[] args)
     {
         Stopwatch sw = Stopwatch.StartNew();
@@ -57,7 +58,14 @@ public static class Program
         {
             IgnoreInaccessible = true,
             RecurseSubdirectories = true
-        }).Select(x => new FilePath(x)).ToArray();
+        })
+            .Where(x =>
+            {
+                var name = Path.GetFileName(x);
+                return !namesToskip.Contains(name);
+            })
+            .Select(x => new FilePath(x))
+            .ToArray();
 
         processor.ScanFiles(filePaths);
     }
