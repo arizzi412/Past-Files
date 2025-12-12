@@ -14,7 +14,7 @@ public class FileDbContext(string dbName) : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
         => options
-            .UseSqlite($"Data Source={dbName}");
+            .UseSqlite($"Data Source={dbName}; Pooling=False");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
