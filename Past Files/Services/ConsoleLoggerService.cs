@@ -62,8 +62,6 @@ namespace Past_Files.Services
                         Console.WriteLine(message);
                     }
 
-                    // Optional: Implement time-based batching
-                    // You can add a delay or implement a timer to flush the batch periodically
                 }
             }
             catch (OperationCanceledException)

@@ -4,7 +4,7 @@ using Past_Files.Models;
 
 namespace Past_Files.Data;
 
-public class FileDbContext(string dbName) : DbContext
+public class FileDbContext(string dbFilePath) : DbContext
 {
     public DbSet<FileRecord> FileRecords { get; set; } = null!;
     public DbSet<FileLocationsHistory> FileLocationsHistory { get; set; } = null!;
@@ -14,7 +14,7 @@ public class FileDbContext(string dbName) : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
         => options
-            .UseSqlite($"Data Source={dbName}; Pooling=False");
+            .UseSqlite($"Data Source={dbFilePath}; Pooling=False");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,7 +49,7 @@ public class FileDbContext(string dbName) : DbContext
             entity.Property(e => e.Path)
                   .HasConversion(
                       path => path.NormalizedPath, // Path object -> string (for DB)
-                      value => new FilePath(value)     // string (from DB) -> Path object
+                      value => new ValidNormalizedFilePath(value)     // string (from DB) -> Path object
                   )
                   .IsRequired(); // Ensure the path is not null
         });

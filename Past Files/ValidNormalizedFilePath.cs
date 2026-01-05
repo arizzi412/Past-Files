@@ -2,19 +2,19 @@
 using System;
 using System.IO;
 
-namespace Past_Files.Models;
+namespace Past_Files;
 
-public class FilePath(string path)
+public class ValidNormalizedFilePath(string path)
 {
     public string NormalizedPath { get; } = NormalizePath(path);
 
-    private static string NormalizePath(string path) => path.Replace(Path.DirectorySeparatorChar, '/');
+    private static string NormalizePath(string path) => path.Replace('\\', '/');
 
     public override string ToString() => NormalizedPath;
 
     public override bool Equals(object? obj)
     {
-        if (obj is FilePath other)
+        if (obj is ValidNormalizedFilePath other)
         {
             return NormalizedPath.Equals(other.NormalizedPath);
         }
@@ -23,12 +23,12 @@ public class FilePath(string path)
 
     public override int GetHashCode() => NormalizedPath.GetHashCode();
 
-    public static implicit operator FilePath(string v)
+    public static implicit operator ValidNormalizedFilePath(string v)
     {
-        return new FilePath(v);
+        return new ValidNormalizedFilePath(v);
     }
 
-    public static implicit operator string(FilePath v)
+    public static implicit operator string(ValidNormalizedFilePath v)
     {
         return v.NormalizedPath;
     }
@@ -58,12 +58,5 @@ public class FilePath(string path)
 
         // Ensure we store it with forward slashes for consistency
         return relative.Replace(Path.DirectorySeparatorChar, '/');
-    }
-
-    public static bool IsValidDirectoryAndExists(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return false;
-        if (path.Any(c => Path.GetInvalidPathChars().Contains(c))) return false;
-        return Directory.Exists(path);
     }
 }

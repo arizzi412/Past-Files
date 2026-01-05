@@ -1,10 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Past_Files.Data;
 using Past_Files.Models;
 using Past_Files.Services;
 using System.Collections.Concurrent;
 
-namespace Past_Files
+namespace Past_Files.Data
 {
     public class DbCache : IDbCache
     {
@@ -31,7 +30,6 @@ namespace Past_Files
             try
             {
                 var fileRecords = context.FileRecords
-                    .AsNoTracking()
                     .Include(f => f.Locations)
                     .Include(f => f.NameHistory)
                     .Where(f => !string.IsNullOrEmpty(f.Hash))
@@ -42,10 +40,6 @@ namespace Past_Files
                     new KeyValuePair<FileIdentityKey, FileRecord>(
                         new FileIdentityKey(fileRecord.NTFSFileID, fileRecord.VolumeSerialNumber),
                         fileRecord));
-
-                var distinct = identityKeyToFileRecordKVPs.DistinctBy(x => x.Key.NTFSFileID).ToList();
-
-                var except = identityKeyToFileRecordKVPs.Except(distinct).ToList();
 
                 IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>(identityKeyToFileRecordKVPs);
             }

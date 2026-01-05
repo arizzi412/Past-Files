@@ -2,7 +2,7 @@
 using Past_Files.Services;
 using System.Collections.Concurrent;
 
-namespace Past_Files
+namespace Past_Files.Data
 {
     public interface IDbCache
     {

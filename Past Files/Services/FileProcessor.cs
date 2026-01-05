@@ -5,12 +5,10 @@ using System.Diagnostics;
 
 namespace Past_Files.Services;
 
-public class FileProcessor(EntityRepository repository, IConcurrentLoggerService logger, int saveIntervalInSeconds = 500) : IDisposable
+public class FileProcessor(EntityRepository repository, IConcurrentLoggerService logger, string errorFile, int saveIntervalInSeconds = 500) : IDisposable
 {
     private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 15;
     private readonly Lock _dbSaveLock = new();
-    private readonly string errorFile = Environment.CurrentDirectory + @"\Scan errors.txt";
-
     private void SaveChangesCallback()
     {
         try
@@ -28,7 +26,7 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
         }
     }
 
-    public void ScanFiles(FilePath[] filePaths)
+    public void ScanFiles(IEnumerable<ValidNormalizedFilePath> filePaths)
     {
         try
         {
@@ -56,7 +54,7 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
         }
     }
 
-    public void ProcessFile(FilePath filePath)
+    public void ProcessFile(ValidNormalizedFilePath filePath)
     {
         try
         {
@@ -67,18 +65,17 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
 
             DateTime currentTime = DateTime.UtcNow;
 
-            bool RecordExistsInDB = repository.TryToFindRecordByFileIdentity(fileIdentityKey, out var fileRecord);
+            bool RecordExistsInDB = repository.TryFindRecord(fileIdentityKey, out var fileRecord);
 
             if (RecordExistsInDB)
             {
-                UpdateExistingRecord(filePath, fileInfo, currentTime, fileRecord!);
+                UpdateRecordIfHasChanges(fileRecord!, filePath, fileInfo, currentTime);
             }
             else
             {
-                fileRecord = repository.CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, currentTime);
+                fileRecord = repository.CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, currentTime, FileHasher.ComputeFileHash(filePath));
             }
 
-            // note no database changes will be written until context.SaveChanges() is called.
         }
         catch (Exception ex)
         {
@@ -89,7 +86,7 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
     }
 
 
-    private void UpdateExistingRecord(FilePath filePath, FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
+    private void UpdateRecordIfHasChanges(FileRecord fileRecord, ValidNormalizedFilePath filePath, FileInfo fileInfo, DateTime currentTime)
     {
         fileRecord!.LastSeen = currentTime;
 
@@ -108,23 +105,20 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
         var nameDifferent = !fileRecord.CurrentFileName.Equals(fileInfo.Name, StringComparison.OrdinalIgnoreCase);
         if (nameDifferent)
         {
-            repository.UpdateFileRecordName(fileInfo, currentTime, fileRecord);
+            repository.UpdateName(fileInfo.Name, currentTime, fileRecord);
         }
 
         var mostRecentLocationInDB = fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime);
 
-        // The DB now contains (or will contain) relative paths"
         string incomingRelativePath = filePath.GetDirectoryRelativeToRoot();
-        string dbPath = mostRecentLocationInDB.Path!.NormalizedPath;
+        string pathInDB = mostRecentLocationInDB.Path!.NormalizedPath;
 
-        // Simple string comparison
-        var locationDifferent = !incomingRelativePath.Equals(dbPath, StringComparison.OrdinalIgnoreCase);
+        var locationDifferent = !incomingRelativePath.Equals(pathInDB, StringComparison.OrdinalIgnoreCase);
 
         if (locationDifferent)
         {
-            repository.UpdateFileRecordLocation(filePath, currentTime, fileRecord);
+            repository.RecordNewFileRecordLocation(filePath, currentTime, fileRecord);
         }
-        repository.UpdateFileRecord(fileRecord);
     }
 
 

@@ -6,16 +6,14 @@ namespace Past_Files.Data;
 
 public class EntityRepository: IDisposable
 {
-    private string dbPath;
-    private FileDbContext dbContext;
-    private DbCache dbCache;
-    private Metadata dbMetadata;
-    private IConcurrentLoggerService loggerService;
+    private readonly FileDbContext dbContext;
+    private readonly DbCache dbCache;
+    private readonly Metadata dbMetadata;
+    private readonly IConcurrentLoggerService loggerService;
 
-    public EntityRepository(IConcurrentLoggerService loggerService)
+    public EntityRepository(string dbPath, IConcurrentLoggerService loggerService)
     {
         this.loggerService = loggerService;
-        dbPath = "filetracker.db";
         dbContext = InitializeandCreateDatabase(dbPath);
         dbCache = DbCache.CreateCache(dbContext, loggerService);
         dbMetadata = dbContext.Metadata.First();
@@ -33,7 +31,7 @@ public class EntityRepository: IDisposable
     public void ScanStartUpdateMetadata()
     {
 
-        dbMetadata.LastScanStartTime = DateTime.Now;
+        dbMetadata.LastScanStartTime = DateTime.UtcNow;
         dbMetadata.LastScanCompleted = false;
         dbContext.SaveChanges();
     }
@@ -44,11 +42,11 @@ public class EntityRepository: IDisposable
         dbContext.SaveChanges();
     }
 
-    public FileRecord CreateNewFileRecordAndAddToDB(FilePath filePath, FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime)
+    public FileRecord CreateNewFileRecordAndAddToDB(ValidNormalizedFilePath filePath, FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime, string hash)
     {
         FileRecord fileRecord = new()
         {
-            Hash = FileHasher.ComputeFileHash(filePath),
+            Hash = hash,
             CurrentFileName = fileInfo.Name,
             Size = fileInfo.Length,
             LastWriteTime = fileInfo.LastWriteTimeUtc,
@@ -63,59 +61,47 @@ public class EntityRepository: IDisposable
         dbContext.FileRecords.Add(fileRecord);
         dbCache.IdentityKeyToFileRecord[fileIdentityKey] = fileRecord;
 
-        var initialNameHistory = new FileNamesHistory
-        {
-            FileName = fileInfo.Name,
-            NameChangeNoticedTime = currentTime,
-            FileRecordId = fileRecord.FileRecordId
-        };
-        dbContext.FileNamesHistory.Add(initialNameHistory);
-        fileRecord.NameHistory.Add(initialNameHistory);
+        RecordNewFileName(fileInfo.Name, currentTime, fileRecord);
 
-
-        var newLocation = new FileLocationsHistory
-        {
-            Path = filePath.GetDirectoryRelativeToRoot(), // Changed from Path.GetDirectoryName
-            FileRecordId = fileRecord.FileRecordId,
-            LocationChangeNoticedTime = currentTime
-        };
-        dbContext.FileLocationsHistory.Add(newLocation);
-        fileRecord.Locations.Add(newLocation);
+        RecordNewFileRecordLocation(filePath, currentTime, fileRecord);
 
         return fileRecord;
     }
 
-    public void UpdateFileRecordName(FileInfo fileInfo, DateTime currentTime, FileRecord fileRecord)
-    {
-        fileRecord.CurrentFileName = fileInfo.Name;
+    
 
-        var nameHistory = new FileNamesHistory
+    public void UpdateName(string fileName, DateTime currentTime, FileRecord fileRecord)
+    {
+        fileRecord.CurrentFileName = fileName;
+
+        RecordNewFileName(fileName, currentTime, fileRecord);
+    }
+
+    private void RecordNewFileName(string fileName, DateTime currentTime, FileRecord fileRecord)
+    {
+        var newNameHistoryEntry = new FileNamesHistory
         {
-            FileName = fileInfo.Name,
+            FileName = fileName,
             NameChangeNoticedTime = currentTime,
             FileRecordId = fileRecord.FileRecordId
         };
-        dbContext.FileNamesHistory.Add(nameHistory);
-        fileRecord.NameHistory.Add(nameHistory);
+        dbContext.FileNamesHistory.Add(newNameHistoryEntry);
+        fileRecord.NameHistory.Add(newNameHistoryEntry);
     }
 
-    public void UpdateFileRecordLocation(FilePath filePath, DateTime currentTime, FileRecord fileRecord)
+    public void RecordNewFileRecordLocation(ValidNormalizedFilePath filePath, DateTime currentTime, FileRecord fileRecord)
     {
         var newLocation = new FileLocationsHistory
         {
-            Path = filePath.GetDirectoryRelativeToRoot(), // Changed from Path.GetDirectoryName
+            Path = filePath.GetDirectoryRelativeToRoot(),
             FileRecordId = fileRecord.FileRecordId,
             LocationChangeNoticedTime = currentTime
         };
         dbContext.FileLocationsHistory.Add(newLocation);
         fileRecord.Locations.Add(newLocation);
     }
-    public void UpdateFileRecord(FileRecord fileRecord)
-    {
-        dbContext.FileRecords.Update(fileRecord);
-    }
 
-    public bool TryToFindRecordByFileIdentity(FileIdentityKey fileIdentityKey, out FileRecord? fileRecord)
+    public bool TryFindRecord(FileIdentityKey fileIdentityKey, out FileRecord? fileRecord)
     {
         return dbCache.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out fileRecord);
     }

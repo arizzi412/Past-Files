@@ -12,20 +12,28 @@ public static class Program
     {
         Stopwatch sw = Stopwatch.StartNew();
 
+        var rootScanDirectory = (args.Length == 0 || string.IsNullOrEmpty(args[0]) || !PathHelpers.IsValidDirectoryAndExists(args[0])) ?  Environment.CurrentDirectory : args[0];
 
-        var rootDirectory = (args.Length == 0 || string.IsNullOrEmpty(args[0]) || !FilePath.IsValidDirectoryAndExists(args[0])) ?  Environment.CurrentDirectory : args[0];
+        string dbPath = args switch
+        {
+            [_, _] => PathHelpers.IsValidFilePath(args[1]) ? args[1] : "filetracker.db",
+            [_] => Path.Combine(rootScanDirectory, "filetracker.db"),
+            _ => "filetracker.db"
+        };
+
+        string errorFilePath = Path.Combine(rootScanDirectory, "Scan Errors.txt");
 
         using (var loggerService = new ConsoleLoggerService())
-        using (var repository = new EntityRepository(loggerService))
+        using (var repository = new EntityRepository(dbPath, loggerService))
         {
-            loggerService.Enqueue($"Backing up {rootDirectory}");
-            FileProcessor processor = new(repository, loggerService, saveIntervalInSeconds: 500);
+            loggerService.Enqueue($"Backing up {rootScanDirectory}");
+            FileProcessor processor = new(repository, loggerService, errorFilePath, saveIntervalInSeconds: 500);
 
             loggerService.Enqueue("Starting scan...");
 
             repository.ScanStartUpdateMetadata();
 
-            ScanSingleThreaded(rootDirectory, processor);
+            ScanSingleThreaded(rootScanDirectory, processor);
 
             sw.Stop();
 
@@ -40,17 +48,6 @@ public static class Program
         PromptExit();
     }
 
-
-    private static void ScanInParallel(string rootDirectory, FileProcessor processor, FileProcessor processor2)
-    {
-        var filePaths = GetSplitFilePaths(rootDirectory);
-
-        var task1 = Task.Factory.StartNew(() => processor.ScanFiles(filePaths[0]), TaskCreationOptions.LongRunning);
-        var task2 = Task.Factory.StartNew(() => processor2.ScanFiles(filePaths[1]), TaskCreationOptions.LongRunning);
-
-        Task.WaitAll(task1, task2);
-    }
-
     private static void ScanSingleThreaded(string rootDirectory, FileProcessor processor)
     {
         var filePaths = Directory.EnumerateFiles(rootDirectory, "*", new EnumerationOptions
@@ -63,22 +60,10 @@ public static class Program
                 var name = Path.GetFileName(x);
                 return !namesToskip.Contains(name);
             })
-            .Select(x => new FilePath(x))
-            .ToArray();
+            .Select(x => new ValidNormalizedFilePath(x));
+            //.ToArray();
 
         processor.ScanFiles(filePaths);
-    }
-
-    private static List<FilePath[]> GetSplitFilePaths(string rootDirectory)
-    {
-        var files = Directory.EnumerateFiles(rootDirectory, "*", new EnumerationOptions
-        {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = true
-        }).ToArray();
-
-        var sizeOfHalf = files.Length / 2 + 1;
-        return [.. files.Select(x => new FilePath(x)).Chunk(sizeOfHalf)];
     }
 
     private static void PromptExit()
