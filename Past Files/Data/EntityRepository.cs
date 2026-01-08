@@ -9,9 +9,9 @@ public class EntityRepository: IDisposable
     private readonly FileDbContext dbContext;
     private readonly DbCache dbCache;
     private readonly Metadata dbMetadata;
-    private readonly IConcurrentLoggerService loggerService;
+    private readonly ConsoleLoggerService loggerService;
 
-    public EntityRepository(string dbPath, IConcurrentLoggerService loggerService)
+    public EntityRepository(string dbPath, ConsoleLoggerService loggerService)
     {
         this.loggerService = loggerService;
         dbContext = InitializeandCreateDatabase(dbPath);

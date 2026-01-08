@@ -12,7 +12,9 @@ public static class Program
     {
         Stopwatch sw = Stopwatch.StartNew();
 
-        var rootScanDirectory = (args.Length == 0 || string.IsNullOrEmpty(args[0]) || !PathHelpers.IsValidDirectoryAndExists(args[0])) ?  Environment.CurrentDirectory : args[0];
+        var rootScanDirectory = args.Length != 0 && PathHelpers.IsDirectoryValidAndExistant(args[0])
+            ?  args[0] 
+            : Environment.CurrentDirectory;
 
         string dbPath = args switch
         {

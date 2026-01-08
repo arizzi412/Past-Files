@@ -7,7 +7,7 @@ namespace Past_Files
     internal class PathHelpers
     {
 
-        public static bool IsValidDirectoryAndExists(string path)
+        public static bool IsDirectoryValidAndExistant(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
             if (path.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return false;
@@ -21,7 +21,6 @@ namespace Past_Files
           
             try
             {
-                // 3. Attempt to normalize the path
                 // Path.GetFullPath will throw specific exceptions if the format is invalid,
                 // the path is too long, or it contains a colon in an invalid position (Windows).
                 string fullPath = Path.GetFullPath(path);

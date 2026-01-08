@@ -5,20 +5,20 @@ using System.Collections.Concurrent;
 
 namespace Past_Files.Data
 {
-    public class DbCache : IDbCache
+    public class DbCache
     {
-        private readonly IConcurrentLoggerService _consoleLogger;
+        private readonly ConsoleLoggerService _consoleLogger;
 
         public ConcurrentDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; private set; }
 
-        public static DbCache CreateCache(FileDbContext fileTrackerContext, IConcurrentLoggerService consoleLoggerService)
+        public static DbCache CreateCache(FileDbContext fileTrackerContext, ConsoleLoggerService consoleLoggerService)
         {
             var ds = new DbCache(consoleLoggerService);
             ds.LoadDbRecords(fileTrackerContext);
             return ds;
         }
 
-        private DbCache(IConcurrentLoggerService consoleLoggerService)
+        private DbCache(ConsoleLoggerService consoleLoggerService)
         {
             _consoleLogger = consoleLoggerService;
             IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>();

@@ -48,7 +48,7 @@ public class FileDbContext(string dbFilePath) : DbContext
             // Configure Path as a value object stored as a string
             entity.Property(e => e.Path)
                   .HasConversion(
-                      path => path.NormalizedPath, // Path object -> string (for DB)
+                      path => path!.NormalizedPath, // Path object -> string (for DB)
                       value => new ValidNormalizedFilePath(value)     // string (from DB) -> Path object
                   )
                   .IsRequired(); // Ensure the path is not null

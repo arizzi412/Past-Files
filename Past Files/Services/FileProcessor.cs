@@ -5,7 +5,7 @@ using System.Diagnostics;
 
 namespace Past_Files.Services;
 
-public class FileProcessor(EntityRepository repository, IConcurrentLoggerService logger, string errorFile, int saveIntervalInSeconds = 500) : IDisposable
+public class FileProcessor(EntityRepository repository, ConsoleLoggerService logger, string errorFile, int saveIntervalInSeconds = 500) : IDisposable
 {
     private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 15;
     private readonly Lock _dbSaveLock = new();
@@ -88,7 +88,9 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
 
     private void UpdateRecordIfHasChanges(FileRecord fileRecord, ValidNormalizedFilePath filePath, FileInfo fileInfo, DateTime currentTime)
     {
-        fileRecord!.LastSeen = currentTime;
+        FileLocationsHistory mostRecentLocationInDB = fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) ?? throw new Exception($"No FileLocationHistory entry in DB for {fileRecord.CurrentFileName}");
+
+        fileRecord.LastSeen = currentTime;
 
         if (fileRecord.LastWriteTime != fileInfo.LastWriteTimeUtc)
         {
@@ -108,7 +110,6 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
             repository.UpdateName(fileInfo.Name, currentTime, fileRecord);
         }
 
-        var mostRecentLocationInDB = fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime);
 
         string incomingRelativePath = filePath.GetDirectoryRelativeToRoot();
         string pathInDB = mostRecentLocationInDB.Path!.NormalizedPath;
@@ -134,5 +135,3 @@ public class FileProcessor(EntityRepository repository, IConcurrentLoggerService
     }
 
 }
-
-public record struct FileIdentityKey(ulong NTFSFileID, uint VolumeSerialNumber);

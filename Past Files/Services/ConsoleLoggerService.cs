@@ -9,7 +9,7 @@ namespace Past_Files.Services
     /// <summary>
     /// A background service that batches log messages and writes them to the console.
     /// </summary>
-    public class ConsoleLoggerService : IConcurrentLoggerService
+    public class ConsoleLoggerService : IDisposable
     {
         private readonly Channel<string> _messageChannel;
         private readonly CancellationTokenSource _cts = new();
