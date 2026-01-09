@@ -4,11 +4,19 @@ namespace Past_Files.FileUtils;
 
 public static class FileHasher
 {
+    private const int BufferSize = 64 * 1024;
+
     public static string ComputeFileHash(string filePath)
     {
-        using var sha256 = SHA256.Create();
-        using var stream = File.OpenRead(filePath);
-        byte[] hashBytes = sha256.ComputeHash(stream);
+        using var stream = new FileStream(
+                  filePath,
+                  FileMode.Open,
+                  FileAccess.Read,
+                  FileShare.Read,
+                  BufferSize,
+                  FileOptions.SequentialScan); // Hint to OS to pre-fetch data
+
+        byte[] hashBytes = SHA256.HashData(stream);
         return Convert.ToHexStringLower(hashBytes);
     }
 }
