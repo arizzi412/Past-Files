@@ -9,11 +9,12 @@ public readonly record struct ValidNormalizedFilePath : IEquatable<ValidNormaliz
 
     public ValidNormalizedFilePath(string path)
     {
+        if (string.IsNullOrEmpty(path)) throw new ArgumentException($"Path cannot be null or empty: {path}");
+        
         NormalizedPath = path.Contains('\\')
             ? path.Replace('\\', '/')
             : path;
     }
-    public override string ToString() => NormalizedPath;
 
     public bool Equals(ValidNormalizedFilePath other)
     {
@@ -21,6 +22,7 @@ public readonly record struct ValidNormalizedFilePath : IEquatable<ValidNormaliz
     }
     public override int GetHashCode() => NormalizedPath.GetHashCode();
 
+    public override string ToString() => NormalizedPath;
     public static implicit operator string(ValidNormalizedFilePath v) => v.NormalizedPath;
 
     /// <summary>
