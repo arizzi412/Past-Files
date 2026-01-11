@@ -111,10 +111,10 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
         }
 
 
-        string incomingRelativePath = filePath.GetDirectoryRelativeToRoot();
-        string pathInDB = mostRecentLocationInDB.Path!.NormalizedPath;
+        var incomingRelativePath = filePath.GetDirectoryRelativeToRoot();
+        var pathInDB = mostRecentLocationInDB.Path!;
 
-        var locationDifferent = !incomingRelativePath.Equals(pathInDB, StringComparison.OrdinalIgnoreCase);
+        var locationDifferent = !incomingRelativePath.Equals(pathInDB);
 
         if (locationDifferent)
         {

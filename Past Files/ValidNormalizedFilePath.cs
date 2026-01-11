@@ -1,62 +1,68 @@
-﻿// Models/Path.cs
-using System;
+﻿using System;
 using System.IO;
 
 namespace Past_Files;
 
-public class ValidNormalizedFilePath(string path)
+public readonly record struct ValidNormalizedFilePath : IEquatable<ValidNormalizedFilePath>
 {
-    public string NormalizedPath { get; } = NormalizePath(path);
+    public string NormalizedPath { get; }
 
-    private static string NormalizePath(string path) => path.Replace('\\', '/');
-
+    public ValidNormalizedFilePath(string path)
+    {
+        NormalizedPath = path.Contains('\\')
+            ? path.Replace('\\', '/')
+            : path;
+    }
     public override string ToString() => NormalizedPath;
 
-    public override bool Equals(object? obj)
+    public bool Equals(ValidNormalizedFilePath other)
     {
-        if (obj is ValidNormalizedFilePath other)
-        {
-            return NormalizedPath.Equals(other.NormalizedPath);
-        }
-        return false;
+        return string.Equals(NormalizedPath, other.NormalizedPath, StringComparison.OrdinalIgnoreCase);
     }
-
     public override int GetHashCode() => NormalizedPath.GetHashCode();
 
-    public static implicit operator ValidNormalizedFilePath(string v)
-    {
-        return new ValidNormalizedFilePath(v);
-    }
-
-    public static implicit operator string(ValidNormalizedFilePath v)
-    {
-        return v.NormalizedPath;
-    }
+    public static implicit operator string(ValidNormalizedFilePath v) => v.NormalizedPath;
 
     /// <summary>
     /// Returns the directory path relative to the drive/volume root.
     /// E.g., "C:/Users/Name/File.txt" -> "Users/Name"
-    /// E.g., "E:/Games/Game.exe" -> "Games"
+    /// E.g., "/var/log/nginx/error.log" -> "var/log/nginx"
     /// </summary>
-    public string GetDirectoryRelativeToRoot()
+    public ValidNormalizedFilePath GetDirectoryRelativeToRoot()
     {
-        // Get the parent directory of the file
-        string? directory = Path.GetDirectoryName(NormalizedPath);
-        if (string.IsNullOrEmpty(directory)) return string.Empty;
+        ReadOnlySpan<char> pathSpan = NormalizedPath.AsSpan();
 
-        // Get the root (e.g., "C:\")
-        string? root = Path.GetPathRoot(directory);
+        // 1. Find the end of the file name (last slash)
+        int lastSlashIndex = pathSpan.LastIndexOf('/');
 
-        // If no root is found, it's already relative or invalid
-        if (string.IsNullOrEmpty(root)) return NormalizePath(directory);
+        // If no slash, it's just a filename (e.g. "file.txt"), so no directory.
+        if (lastSlashIndex < 0) return new(string.Empty);
 
-        // Get relative path (e.g., "Users\Name")
-        string relative = Path.GetRelativePath(root, directory);
+        int rootEndIndex = 0;
 
-        // Handle case where file is at root (returns ".")
-        if (relative == ".") return string.Empty;
+        int colonIndex = pathSpan.IndexOf(':');
+        if (colonIndex >= 0)
+        {
+            // Root is "C:/" so end is colon + 2
+            rootEndIndex = colonIndex + 2;
+        }
+        else if (pathSpan.Length > 0 && pathSpan[0] == '/')
+        {
+            // Unix Root is "/" so end is 1
+            rootEndIndex = 1;
+        }
 
-        // Ensure we store it with forward slashes for consistency
-        return relative.Replace(Path.DirectorySeparatorChar, '/');
+        // 3. Calculate length of the target directory section
+        // Example: C:/Users/File.txt
+        // Indices: 012345678...
+        // RootEnd: 3 ("C:/")
+        // LastSlash: 8 (After "Users")
+        // Length: 8 - 3 = 5 ("Users")
+
+        int length = lastSlashIndex - rootEndIndex;
+
+        if (length <= 0) return new(string.Empty);
+
+        return new(pathSpan.Slice(rootEndIndex, length).ToString());
     }
 }
