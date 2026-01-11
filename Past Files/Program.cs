@@ -1,5 +1,4 @@
 ﻿using Past_Files.Data;
-using Past_Files.Models;
 using Past_Files.Services;
 using System.Diagnostics;
 
@@ -13,7 +12,7 @@ public static class Program
         Stopwatch sw = Stopwatch.StartNew();
 
         var rootScanDirectory = args.Length != 0 && PathHelpers.IsDirectoryValidAndExistant(args[0])
-            ?  args[0] 
+            ? args[0]
             : Environment.CurrentDirectory;
 
         string dbPath = args switch
@@ -57,15 +56,20 @@ public static class Program
             IgnoreInaccessible = true,
             RecurseSubdirectories = true
         })
-            .Where(x =>
-            {
-                var name = Path.GetFileName(x);
-                return !namesToskip.Contains(name);
-            })
+            .Where(FileNameNotInSkipList)
             .Select(x => new ValidNormalizedFilePath(x));
-            //.ToArray();
 
         processor.ScanFiles(filePaths);
+    }
+
+    private static bool FileNameNotInSkipList(string path)
+    {
+        var fileName = Path.GetFileName(path.AsSpan());
+        foreach (var skipName in namesToskip)
+        {
+            if (fileName.Equals(skipName, StringComparison.OrdinalIgnoreCase)) return false; // Skip this file
+        }
+        return true; // Keep this file 
     }
 
     private static void PromptExit()
