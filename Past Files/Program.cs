@@ -1,4 +1,5 @@
 ﻿using Past_Files.Data;
+using Past_Files.FileUtils;
 using Past_Files.Services;
 using System.Diagnostics;
 
@@ -6,10 +7,12 @@ namespace Past_Files;
 
 public static class Program
 {
-    static readonly List<string> namesToskip = ["filetracker.db", "filetracker.db-shm", "filetracker.db-wal"];
     public static void Main(string[] args)
     {
         Stopwatch sw = Stopwatch.StartNew();
+
+        using var logger = new ConsoleLoggerService();
+        logger.Log($"Starting..");
 
         var rootScanDirectory = args.Length != 0 && PathHelpers.IsDirectoryValidAndExistant(args[0])
             ? args[0]
@@ -22,56 +25,77 @@ public static class Program
             _ => "filetracker.db"
         };
 
-        string errorFilePath = Path.Combine(rootScanDirectory, "Scan Errors.txt");
-
-        using (var loggerService = new ConsoleLoggerService())
-        using (var repository = new EntityRepository(dbPath, loggerService))
+        using (var repository = new EntityRepository(dbPath, logger))
         {
-            loggerService.Enqueue($"Backing up {rootScanDirectory}");
-            FileProcessor processor = new(repository, loggerService, errorFilePath, saveIntervalInSeconds: 500);
+            logger.Log($"Backing up {rootScanDirectory}");
 
-            loggerService.Enqueue("Starting scan...");
+            string errorFilePath = Path.Combine(rootScanDirectory, "Scan Errors.txt");
+            FileProcessor processor = new(repository, logger, FileHasherSHA256.ComputeHash, errorFilePath, saveIntervalInSeconds: 500);
+
+            logger.Log("Starting scan...");
 
             repository.ScanStartUpdateMetadata();
 
-            ScanSingleThreaded(rootScanDirectory, processor);
+            List<string> filePathsToSkip = [$"{dbPath}", $"{dbPath}-shm", $"{dbPath}-wal"];
+            var filePaths = EnumerateAndFilterFiles(rootScanDirectory, filePathsToSkip)
+                .Select(x => new ValidNormalizedFilePath(x));
+
+            processor.ScanFiles(filePaths);
 
             sw.Stop();
 
-            loggerService.Enqueue($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
+            logger.Log($"Scan took {sw.ElapsedMilliseconds / 1000} seconds");
 
             repository.ScanEndUpdateMetadata();
 
-            loggerService.Enqueue("Scan completed. Database Updated.");
+            logger.Log("Scan completed. Database Updated.");
         }
 
         // Gracefully exit
         PromptExit();
     }
 
-    private static void ScanSingleThreaded(string rootDirectory, FileProcessor processor)
+    private static IEnumerable<string> EnumerateAndFilterFiles(string rootDirectory, List<string> filePathsToSkip)
     {
-        var filePaths = Directory.EnumerateFiles(rootDirectory, "*", new EnumerationOptions
+        // Clone the target filenames into a local list so we can remove them as we find them.
+        var remainingToSkip = new List<string>(filePathsToSkip);
+
+        var options = new EnumerationOptions
         {
             IgnoreInaccessible = true,
             RecurseSubdirectories = true
-        })
-            .Where(FileNameNotInSkipList)
-            .Select(x => new ValidNormalizedFilePath(x));
+        };
 
-        processor.ScanFiles(filePaths);
-    }
-
-    private static bool FileNameNotInSkipList(string path)
-    {
-        var fileName = Path.GetFileName(path.AsSpan());
-        foreach (var skipName in namesToskip)
+        foreach (var path in Directory.EnumerateFiles(rootDirectory, "*", options))
         {
-            if (fileName.Equals(skipName, StringComparison.OrdinalIgnoreCase)) return false; // Skip this file
-        }
-        return true; // Keep this file 
-    }
+            // FAST PATH: We already found the files to skip. 
+            if (remainingToSkip.Count == 0)
+            {
+                yield return path;
+                continue;
+            }
 
+            // SLOW PATH: We are still hunting for the files to skip.
+            var fileName = path.AsSpan();
+            bool isFileToSkip = false;
+
+            for (int i = 0; i < remainingToSkip.Count; i++)
+            {
+                if (fileName.Equals(remainingToSkip[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    remainingToSkip.RemoveAt(i); // Remove it so we don't look for it again
+                    isFileToSkip = true;
+                    break;
+                }
+            }
+
+            // If it wasn't one of our skipped files, return it to the processor
+            if (!isFileToSkip)
+            {
+                yield return path;
+            }
+        }
+    }
     private static void PromptExit()
     {
         Console.WriteLine("\nPress any key to exit...");

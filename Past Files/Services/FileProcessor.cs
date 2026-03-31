@@ -5,24 +5,26 @@ using System.Diagnostics;
 
 namespace Past_Files.Services;
 
-public class FileProcessor(EntityRepository repository, ConsoleLoggerService logger, string errorFile, int saveIntervalInSeconds = 500) : IDisposable
+/// <summary>
+/// Represents a method that computes a hash value for the specified file.
+/// </summary>
+/// <param name="filePath">The path to the file to hash. Cannot be null or empty.</param>
+/// <returns>A string containing the computed hash value of the file.</returns>
+public delegate string HashFileMethod(string filePath);
+
+public class FileProcessor(EntityRepository repository, ConsoleLoggerService logger, HashFileMethod hashFileMethod, string errorFile, int saveIntervalInSeconds = 500) : IDisposable
 {
+
     private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 15;
-    private readonly Lock _dbSaveLock = new();
     private void SaveChangesCallback()
     {
         try
         {
-            lock (_dbSaveLock)
-            {
                 repository.SaveIfHasChanges();
-            }
         }
         catch (Exception ex)
         {
-            string message = $"[TIMER ERROR] Failed to save changes: {ex.Message} Inner Exception: {ex.InnerException}\n";
-            logger.Enqueue(message);
-            File.AppendAllTextAsync(errorFile, message);
+            LogError("[TIMER ERROR] Failed to save changes", ex);
         }
     }
 
@@ -33,7 +35,7 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
             Stopwatch stopwatch = Stopwatch.StartNew();
             foreach (var filePath in filePaths)
             {
-                logger.Enqueue($"Processing {filePath}");
+                logger.Log($"Processing {filePath}");
 
                 ProcessFile(filePath);
                 if (stopwatch.ElapsedMilliseconds > _saveIntervalInSeconds * 1000)
@@ -48,9 +50,7 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error during scanning: {ex.Message}.  Inner exception: {ex.InnerException}\n";
-            logger.Enqueue(errorMessage);
-            File.AppendAllTextAsync(errorFile, errorMessage);
+            LogError("Error during scanning", ex);
         }
     }
 
@@ -58,45 +58,42 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
     {
         try
         {
-            var fileInfo = new FileInfo(filePath);
             var fileIdentityKey = FileIdentifier.GetFileIdentityKey(filePath);
+            var fileInfo = new FileInfo(filePath);
 
             if (!fileInfo.Exists) return;
-
-            DateTime currentTime = DateTime.UtcNow;
 
             bool RecordExistsInDB = repository.TryFindRecord(fileIdentityKey, out var fileRecord);
 
             if (RecordExistsInDB)
             {
-                UpdateRecordIfHasChanges(fileRecord!, filePath, fileInfo, currentTime);
+                UpdateRecordIfHasChanges(fileRecord!, filePath, fileInfo);
             }
             else
             {
-                fileRecord = repository.CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, currentTime, FileHasher.ComputeFileHash(filePath));
+                fileRecord = repository.CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, hashFileMethod(filePath));
             }
 
         }
         catch (Exception ex)
         {
-            string errorMessage = $"Error processing file '{filePath}': {ex.Message}.  Inner exception: {ex.InnerException}\n";
-            logger.Enqueue(errorMessage);
-            File.AppendAllTextAsync(errorFile, errorMessage);
+            LogError($"Error processing file '{filePath}'", ex);
         }
     }
 
 
-    private void UpdateRecordIfHasChanges(FileRecord fileRecord, ValidNormalizedFilePath filePath, FileInfo fileInfo, DateTime currentTime)
+    private void UpdateRecordIfHasChanges(FileRecord fileRecord, ValidNormalizedFilePath filePath, FileInfo fileInfo)
     {
         FileLocationsHistory mostRecentLocationInDB = fileRecord.Locations.MaxBy(x => x.LocationChangeNoticedTime) ?? throw new Exception($"No FileLocationHistory entry in DB for {fileRecord.CurrentFileName}");
 
+        var currentTime = DateTime.UtcNow;
         fileRecord.LastSeen = currentTime;
 
         if (fileRecord.LastWriteTime != fileInfo.LastWriteTimeUtc)
         {
             fileRecord.Size = fileInfo.Length;
 
-            string newHash = FileHasher.ComputeFileHash(filePath);
+            string newHash = hashFileMethod(filePath);
             if (fileRecord.Hash != newHash)
             {
                 fileRecord.Hash = newHash;
@@ -121,17 +118,15 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
             repository.RecordNewFileRecordLocation(filePath, currentTime, fileRecord);
         }
     }
-
+    private void LogError(string contextMessage, Exception ex)
+    {
+        string message = $"{contextMessage}: {ex.Message}. Inner Exception: {ex.InnerException?.Message}\n";
+        logger.Log(message);
+        File.AppendAllTextAsync(errorFile, message);
+    }
 
     public void Dispose()
     {
-        logger.Dispose();
-
-        lock (_dbSaveLock)
-        {
             repository.SaveIfHasChanges();
-        }
-        repository.Dispose();
     }
-
 }

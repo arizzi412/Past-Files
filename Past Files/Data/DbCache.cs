@@ -26,7 +26,7 @@ namespace Past_Files.Data
 
         private void LoadDbRecords(FileDbContext context)
         {
-            _consoleLogger.Enqueue("Loading database into memory");
+            _consoleLogger.Log("Loading database into memory");
             try
             {
                 var fileRecords = context.FileRecords
@@ -45,7 +45,7 @@ namespace Past_Files.Data
             }
             catch (Exception ex)
             {
-                _consoleLogger.Enqueue($"Error loading records into memory: {ex.Message}");
+                _consoleLogger.Log($"Error loading records into memory: {ex.Message}");
             }
         }
     }

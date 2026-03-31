@@ -9,6 +9,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	<IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
 	<LangVersion>preview</LangVersion>
+	<PublishAot>False</PublishAot>
+	<PublishTrimmed>False</PublishTrimmed>
 
   </PropertyGroup>
 

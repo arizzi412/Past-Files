@@ -6,7 +6,6 @@ namespace Past_Files
 {
     internal class PathHelpers
     {
-
         public static bool IsDirectoryValidAndExistant(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
@@ -28,21 +27,13 @@ namespace Past_Files
                 // 4. Check for invalid file name characters specifically
                 // (sometimes needed because GetFullPath allows some things in the directory part 
                 // that aren't allowed in the file name part)
-                string fileName = Path.GetFileName(path);
+                var fileName = Path.GetFileName(path.AsSpan());
 
                 if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
 
-
                 return true;
             }
-            catch (Exception ex) when (
-                ex is ArgumentException ||
-                ex is NotSupportedException ||
-                ex is PathTooLongException)
-            {
-                // The path is invalid according to .NET/OS rules
-                return false;
-            }
+
             catch (Exception)
             {
                 return false;

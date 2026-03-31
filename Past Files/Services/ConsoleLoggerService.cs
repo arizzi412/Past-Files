@@ -36,7 +36,7 @@ namespace Past_Files.Services
         /// Enqueue a message for asynchronous console logging.
         /// </summary>
         /// <param name="message">The log message.</param>
-        public void Enqueue(string message)
+        public void Log(string message)
         {
             if (!_messageChannel.Writer.TryWrite(message))
             {

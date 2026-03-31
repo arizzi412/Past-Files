@@ -2,7 +2,7 @@
   "profiles": {
     "Past Files": {
       "commandName": "Project",
-      "commandLineArgs": "\"D:/Firaxis Games/\""
+      "commandLineArgs": "\"D:/Firaxis Games/\" \"C:\\Users\\arizz\\Desktop\\filetracker.db\""
     }
   }
 }

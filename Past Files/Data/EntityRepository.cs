@@ -42,8 +42,9 @@ public class EntityRepository: IDisposable
         dbContext.SaveChanges();
     }
 
-    public FileRecord CreateNewFileRecordAndAddToDB(ValidNormalizedFilePath filePath, FileInfo fileInfo, FileIdentityKey fileIdentityKey, DateTime currentTime, string hash)
+    public FileRecord CreateNewFileRecordAndAddToDB(ValidNormalizedFilePath filePath, FileInfo fileInfo, FileIdentityKey fileIdentityKey, string hash)
     {
+        var currentTime = DateTime.UtcNow;
         FileRecord fileRecord = new()
         {
             Hash = hash,
@@ -112,7 +113,7 @@ public class EntityRepository: IDisposable
         if (dbContext.ChangeTracker.HasChanges())
         {
             dbContext.SaveChanges();
-            loggerService.Enqueue("Database changes saved.");
+            loggerService.Log("Database changes saved.");
         }
     }
 

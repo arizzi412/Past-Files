@@ -1,12 +1,12 @@
-﻿using System.Security.Cryptography;
+﻿using Past_Files.Services;
+using System.Security.Cryptography;
 
 namespace Past_Files.FileUtils;
 
-public static class FileHasher
+public class FileHasherSHA256
 {
     private const int BufferSize = 64 * 1024;
-
-    public static string ComputeFileHash(string filePath)
+    public static string ComputeHash(string filePath)
     {
         using var stream = new FileStream(
                   filePath,
