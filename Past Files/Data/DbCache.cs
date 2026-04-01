@@ -9,19 +9,18 @@ namespace Past_Files.Data
     {
         private readonly ConsoleLoggerService _consoleLogger;
 
-        public ConcurrentDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; private set; }
+        public IDictionary<FileIdentityKey, FileRecord> IdentityKeyToFileRecord { get; private set; }
 
         public static DbCache CreateCache(FileDbContext fileTrackerContext, ConsoleLoggerService consoleLoggerService)
         {
-            var ds = new DbCache(consoleLoggerService);
-            ds.LoadDbRecords(fileTrackerContext);
-            return ds;
+            var cache = new DbCache(consoleLoggerService);
+            cache.LoadDbRecords(fileTrackerContext);
+            return cache;
         }
 
         private DbCache(ConsoleLoggerService consoleLoggerService)
         {
             _consoleLogger = consoleLoggerService;
-            IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>();
         }
 
         private void LoadDbRecords(FileDbContext context)
@@ -36,12 +35,9 @@ namespace Past_Files.Data
                     .AsSplitQuery()
                     .ToList();
 
-                var identityKeyToFileRecordKVPs = fileRecords.Select(fileRecord =>
-                    new KeyValuePair<FileIdentityKey, FileRecord>(
-                        new FileIdentityKey(fileRecord.NTFSFileID, fileRecord.VolumeSerialNumber),
-                        fileRecord));
-
-                IdentityKeyToFileRecord = new ConcurrentDictionary<FileIdentityKey, FileRecord>(identityKeyToFileRecordKVPs);
+                IdentityKeyToFileRecord = fileRecords.ToDictionary(
+                    fr => new FileIdentityKey(fr.NTFSFileID, fr.VolumeSerialNumber),
+                    fr => fr);
             }
             catch (Exception ex)
             {
