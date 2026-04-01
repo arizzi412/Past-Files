@@ -1,18 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace Past_Files.Services
 {
     /// <summary>
-    /// A background service that batches log messages and writes them to the console.
+    /// A background service that asynchronously writes log messages to the console.
     /// </summary>
     public class ConsoleLoggerService : IDisposable
     {
         private readonly Channel<string> _messageChannel;
-        private readonly CancellationTokenSource _cts = new();
         private readonly Task _loggerTask;
 
         /// <summary>
@@ -20,7 +17,6 @@ namespace Past_Files.Services
         /// </summary>
         public ConsoleLoggerService()
         {
-            // Create an unbounded channel with single reader for better performance
             var options = new UnboundedChannelOptions
             {
                 SingleReader = true,
@@ -28,8 +24,8 @@ namespace Past_Files.Services
             };
             _messageChannel = Channel.CreateUnbounded<string>(options);
 
-            // Start the background logging task
-            _loggerTask = Task.Run(() => ProcessQueueAsync(_cts.Token));
+            // Start the background logging task (No CancellationToken needed)
+            _loggerTask = Task.Run(ProcessQueueAsync);
         }
 
         /// <summary>
@@ -40,37 +36,22 @@ namespace Past_Files.Services
         {
             if (!_messageChannel.Writer.TryWrite(message))
             {
-                // Handle cases where the channel is full or completed
-                throw new InvalidOperationException("Unable to enqueue log message.");
+                // This will now only trigger if Log() is called AFTER Dispose()
+                throw new InvalidOperationException("Unable to enqueue log message. Logger is shutting down.");
             }
         }
 
         /// <summary>
-        /// Main loop that processes the queue and writes to the console in batches.
+        /// Main loop that processes the queue and writes to the console one by one.
         /// </summary>
-        /// <param name="token">Cancellation token.</param>
-        private async Task ProcessQueueAsync(CancellationToken token)
+        private async Task ProcessQueueAsync()
         {
             var reader = _messageChannel.Reader;
 
-            try
+            // WaitToReadAsync automatically returns false when the channel is marked as 
+            // Complete() AND all remaining messages have been drained.
+            while (await reader.WaitToReadAsync())
             {
-                while (await reader.WaitToReadAsync(token))
-                {
-                    while (reader.TryRead(out var message))
-                    {
-                        Console.WriteLine(message);
-                    }
-
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during shutdown
-            }
-            finally
-            {
-                // Process any remaining messages
                 while (reader.TryRead(out var message))
                 {
                     Console.WriteLine(message);
@@ -79,25 +60,15 @@ namespace Past_Files.Services
         }
 
         /// <summary>
-        /// Disposes the logger service, ensuring all messages are processed.
+        /// Disposes the logger service, ensuring all pending messages are written to the console.
         /// </summary>
         public void Dispose()
         {
-            _cts.Cancel();
-            _messageChannel.Writer.Complete();
+            // 1. Tell the channel to close the gates. No more messages are allowed in.
+            _messageChannel.Writer.TryComplete();
 
-            try
-            {
-                _loggerTask.Wait();
-            }
-            catch (AggregateException ex) when (ex.InnerExceptions.All(e => e is OperationCanceledException))
-            {
-                // Ignore cancellation exceptions
-            }
-            finally
-            {
-                _cts.Dispose();
-            }
+            // 2. Block until ProcessQueueAsync finishes draining the remaining messages
+            _loggerTask.Wait();
         }
     }
 }

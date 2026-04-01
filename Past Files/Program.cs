@@ -27,6 +27,8 @@ public static class Program
 
         using (var repository = new EntityRepository(dbPath, logger))
         {
+            RegisterGracefulShutdownBehavior(logger, repository);
+
             logger.Log($"Backing up {rootScanDirectory}");
 
             string errorFilePath = Path.Combine(rootScanDirectory, "Scan Errors.txt");
@@ -53,6 +55,28 @@ public static class Program
 
         // Gracefully exit
         PromptExit();
+    }
+
+    private static void RegisterGracefulShutdownBehavior(ConsoleLoggerService logger, EntityRepository repository)
+    {
+        // 1. Catches "Ctrl+C" in the console
+        Console.CancelKeyPress += (sender, eventArgs) =>
+        {
+            DisposeEverything(logger, repository);
+        };
+
+        // 2. Catches clicking the "X" button or server shutdown
+        AppDomain.CurrentDomain.ProcessExit += (sender, eventArgs) =>
+        {
+            DisposeEverything(logger, repository);
+        };
+    }
+
+    private static void DisposeEverything(ConsoleLoggerService logger, EntityRepository repository)
+    {
+        Console.WriteLine("Gracefully shutting down...");
+        logger.Dispose();
+        repository.Dispose();
     }
 
     private static IEnumerable<string> EnumerateAndFilterFiles(string rootDirectory, List<string> filePathsToSkip)
