@@ -12,48 +12,8 @@ namespace Past_Files.Services;
 /// <returns>A string containing the computed hash value of the file.</returns>
 public delegate string HashFileMethod(string filePath);
 
-public class FileProcessor(EntityRepository repository, ConsoleLoggerService logger, HashFileMethod hashFileMethod, string errorFile, int saveIntervalInSeconds = 500) : IDisposable
+public class FileProcessor(EntityRepository repository, ConsoleLoggerService logger, HashFileMethod hashFileAlgorithm, string errorFile) : IDisposable
 {
-
-    private readonly int _saveIntervalInSeconds = saveIntervalInSeconds > 0 ? saveIntervalInSeconds : 15;
-    private void SaveChangesCallback()
-    {
-        try
-        {
-                repository.SaveIfHasChanges();
-        }
-        catch (Exception ex)
-        {
-            LogError("[TIMER ERROR] Failed to save changes", ex);
-        }
-    }
-
-    public void ScanFiles(IEnumerable<ValidNormalizedFilePath> filePaths)
-    {
-        try
-        {
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            foreach (var filePath in filePaths)
-            {
-                logger.Log($"Processing {filePath}");
-
-                ProcessFile(filePath);
-                if (stopwatch.ElapsedMilliseconds > _saveIntervalInSeconds * 1000)
-                {
-                    SaveChangesCallback();
-                    stopwatch.Restart();
-                }
-            }
-
-            SaveChangesCallback();
-
-        }
-        catch (Exception ex)
-        {
-            LogError("Error during scanning", ex);
-        }
-    }
-
     public void ProcessFile(ValidNormalizedFilePath filePath)
     {
         try
@@ -71,7 +31,7 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
             }
             else
             {
-                fileRecord = repository.CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, hashFileMethod(filePath));
+                fileRecord = repository.CreateNewFileRecordAndAddToDB(filePath, fileInfo, fileIdentityKey, hashFileAlgorithm(filePath));
             }
 
         }
@@ -80,7 +40,6 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
             LogError($"Error processing file '{filePath}'", ex);
         }
     }
-
 
     private void UpdateRecordIfHasChanges(FileRecord fileRecord, ValidNormalizedFilePath filePath, FileInfo fileInfo)
     {
@@ -93,7 +52,7 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
         {
             fileRecord.Size = fileInfo.Length;
 
-            string newHash = hashFileMethod(filePath);
+            string newHash = hashFileAlgorithm(filePath);
             if (fileRecord.Hash != newHash)
             {
                 fileRecord.Hash = newHash;
@@ -106,7 +65,6 @@ public class FileProcessor(EntityRepository repository, ConsoleLoggerService log
         {
             repository.UpdateName(fileInfo.Name, currentTime, fileRecord);
         }
-
 
         var incomingRelativePath = filePath.GetDirectoryRelativeToRoot();
         var pathInDB = mostRecentLocationInDB.Path!;

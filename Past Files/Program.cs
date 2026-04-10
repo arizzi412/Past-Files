@@ -7,6 +7,7 @@ namespace Past_Files;
 
 public static class Program
 {
+    const int _saveIntervalInSeconds = 300;
     public static void Main(string[] args)
     {
         Stopwatch sw = Stopwatch.StartNew();
@@ -29,20 +30,39 @@ public static class Program
         {
             RegisterGracefulShutdownBehavior(logger, repository);
 
-            logger.Log($"Backing up {rootScanDirectory}");
+            logger.Log($"Processing {rootScanDirectory} | Database path: {dbPath}");
 
             string errorFilePath = Path.Combine(rootScanDirectory, "Scan Errors.txt");
-            FileProcessor processor = new(repository, logger, FileHasherSHA256.ComputeHash, errorFilePath, saveIntervalInSeconds: 500);
+            FileProcessor processor = new(repository, logger, FileHasherSHA256.ComputeHash, errorFilePath);
 
             logger.Log("Starting scan...");
-
             repository.ScanStartUpdateMetadata();
 
             List<string> filePathsToSkip = [$"{dbPath}", $"{dbPath}-shm", $"{dbPath}-wal"];
             var filePaths = EnumerateAndFilterFiles(rootScanDirectory, filePathsToSkip)
                 .Select(x => new ValidNormalizedFilePath(x));
 
-            processor.ScanFiles(filePaths);
+            try
+            {
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                foreach (var filePath in filePaths)
+                {
+                    logger.Log($"Processing {filePath}");
+                    processor.ProcessFile(filePath);
+                    if (stopwatch.ElapsedMilliseconds > _saveIntervalInSeconds * 1000)
+                    {
+                        repository.SaveIfHasChanges();
+                        stopwatch.Restart();
+                    }
+                }
+
+                repository.SaveIfHasChanges();
+
+            }
+            catch (Exception ex)
+            {
+                logger.Log($"Error during scanning.  Exception: {ex}");
+            }
 
             sw.Stop();
 
@@ -81,7 +101,6 @@ public static class Program
 
     private static IEnumerable<string> EnumerateAndFilterFiles(string rootDirectory, List<string> filePathsToSkip)
     {
-        // Clone the target filenames into a local list so we can remove them as we find them.
         var remainingToSkip = new List<string>(filePathsToSkip);
 
         var options = new EnumerationOptions
@@ -113,7 +132,6 @@ public static class Program
                 }
             }
 
-            // If it wasn't one of our skipped files, return it to the processor
             if (!isFileToSkip)
             {
                 yield return path;

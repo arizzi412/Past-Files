@@ -19,14 +19,12 @@ public class EntityRepository: IDisposable
         dbMetadata = dbContext.Metadata.First();
     }
 
-
     private static FileDbContext InitializeandCreateDatabase(string dbPath)
     {
         var dbContext = new FileDbContext(dbPath);
         dbContext.Database.EnsureCreated();
         return dbContext;
     }
-
 
     public void ScanStartUpdateMetadata()
     {
@@ -69,12 +67,9 @@ public class EntityRepository: IDisposable
         return fileRecord;
     }
 
-    
-
     public void UpdateName(string fileName, DateTime currentTime, FileRecord fileRecord)
     {
         fileRecord.CurrentFileName = fileName;
-
         RecordNewFileName(fileName, currentTime, fileRecord);
     }
 
@@ -94,7 +89,7 @@ public class EntityRepository: IDisposable
     {
         var newLocation = new FileLocationsHistory
         {
-            Path = filePath.GetDirectoryRelativeToRoot(),
+            Path = PathHelpers.GetDirectoryRelativeToRoot(filePath),
             FileRecordId = fileRecord.FileRecordId,
             LocationChangeNoticedTime = currentTime
         };
@@ -107,13 +102,19 @@ public class EntityRepository: IDisposable
         return dbCache.IdentityKeyToFileRecord.TryGetValue(fileIdentityKey, out fileRecord);
     }
 
-
     public void SaveIfHasChanges()
     {
-        if (dbContext.ChangeTracker.HasChanges())
+        try
         {
-            dbContext.SaveChanges();
-            loggerService.Log("Database changes saved.");
+            if (dbContext.ChangeTracker.HasChanges())
+            {
+                dbContext.SaveChanges();
+                loggerService.Log("Database changes saved.");
+            }
+        }
+        catch (Exception ex)
+        {
+            loggerService.Log($"[TIMER ERROR] Failed to save changes.  Exception: {ex}");
         }
     }
 
